@@ -18,9 +18,9 @@
 #include <esp_attr.h>
 #endif
 
-CLASS_MODULE_DS3231 module_ds3231(false);
-CLASS_MODULE_DS3231::CLASS_MODULE_DS3231(bool _in) {
-    dumb = _in; _lastError = 0; _wireStarted = false;
+CLASS_MODULE_DS3231 module_ds3231;
+CLASS_MODULE_DS3231::CLASS_MODULE_DS3231() {
+    _lastError = 0; _wireStarted = false;
 #if defined(ESP32)
     _sqwIrqFlag = false;
     _sqwLastLowEdge = false;

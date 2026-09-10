@@ -51,7 +51,7 @@ typedef struct {
 
 class CLASS_MODULE_DS3231 {
 public:
-    CLASS_MODULE_DS3231(bool _in);
+    CLASS_MODULE_DS3231();
 #if defined(ESP32)
     void setFs(fs::LittleFSFS* fs);
 #elif defined(ESP8266)
@@ -139,7 +139,6 @@ private:
     bool saveConfig();
 
 protected:
-    bool dumb;
 #if defined(ESP32)
     fs::LittleFSFS* _fs;
 #elif defined(ESP8266)
