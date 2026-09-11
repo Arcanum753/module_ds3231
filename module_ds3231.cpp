@@ -1,6 +1,7 @@
 #include "core_web/FSWebServerLib.h"
 
 #include "module_ds3231.h"
+#include "common_module.h"
 #include "module_ds3231_version.h"
 #include "common/common.h"
 #include "core_sys/eertos.h"
@@ -32,12 +33,6 @@ CLASS_MODULE_DS3231::CLASS_MODULE_DS3231() {
     _sqwInterrupting = false;
 #endif
 }
-
-// Forward declarations (используются веб-обработчиками)
-#if defined(ESP32)
-static void _formatAlarmTime(time_t t, String &out);
-static void _formatAlarmStamp(time_t t, String &out);
-#endif
 
 #if defined(ESP32)
 void CLASS_MODULE_DS3231::setFs(fs::LittleFSFS* fs)
@@ -565,8 +560,8 @@ void CLASS_MODULE_DS3231::emitAlarmState(String &values) {
     bool has1 = (_lastAlarm1At != 0);
     bool has2 = (_lastAlarm2At != 0);
     String t1, t2;
-    _formatAlarmStamp(_lastAlarm1At, t1);
-    _formatAlarmStamp(_lastAlarm2At, t2);
+    ns_module_ds3231::_formatAlarmStamp(_lastAlarm1At, t1);
+    ns_module_ds3231::_formatAlarmStamp(_lastAlarm2At, t2);
 
     String st = "";
     if (has1 && has2) { st = "Alarm 1: " + t1 + " | Alarm 2: " + t2; }
@@ -685,109 +680,6 @@ void IRAM_ATTR ds3231SqwIsr() {
 
 void ds3231SqwPollTask() {
     module_ds3231.sqwPollStep();
-}
-#endif
-
-// BCD — статические вспомогательные функции
-
-static uint8_t _dec2bcd(uint8_t dec) {
-    return ((dec / 10) << 4) | (dec % 10);
-}
-
-static uint8_t _bcd2dec(uint8_t bcd) {
-    return ((bcd >> 4) * 10) + (bcd & 0x0F);
-}
-
-// Будильники — декодирование/кодирование режимов
-// Alarm 1: 4 байта с 0x07 (sec, min, hour, day/date)
-// Alarm 2: 3 байта с 0x0B (min, hour, day/date)
-// mode: 0=once, 1=match_sec/min, 2=match_min_sec/min_min, 3=match_hr_min_sec/hr_min, 4=match_day_date
-
-static void _decodeAlarm1Mode(uint8_t *buf, uint8_t &mode, uint8_t &dayOrDate, bool &isDayOfWeek) {
-    bool a1m1 = (buf[0] >> 7) & 1;
-    bool a1m2 = (buf[1] >> 7) & 1;
-    bool a1m3 = (buf[2] >> 7) & 1;
-    bool a1m4 = (buf[3] >> 7) & 1;
-    isDayOfWeek = (buf[3] >> 6) & 1;
-
-    if (a1m1 && a1m2 && a1m3 && a1m4)              { mode = 0; }
-    else if (!a1m1 && a1m2 && a1m3 && a1m4)        { mode = 1; }
-    else if (!a1m1 && !a1m2 && a1m3 && a1m4)        { mode = 2; }
-    else if (!a1m1 && !a1m2 && !a1m3 && a1m4)        { mode = 3; }
-    else                                             { mode = 4; }
-
-    dayOrDate = _bcd2dec(buf[3] & 0x3F);
-}
-
-static void _encodeAlarm1Mode(uint8_t *buf, uint8_t sec, uint8_t min, uint8_t hour, uint8_t mode, uint8_t dayOrDate, bool isDayOfWeek) {
-    buf[0] = _dec2bcd(sec);
-    buf[1] = _dec2bcd(min);
-    buf[2] = _dec2bcd(hour);
-    buf[3] = _dec2bcd(dayOrDate);
-    if (isDayOfWeek) { buf[3] |= 0x40; }
-
-    switch (mode) {
-        case 0: buf[0] |= 0x80; buf[1] |= 0x80; buf[2] |= 0x80; buf[3] |= 0x80; break;
-        case 1:                     buf[1] |= 0x80; buf[2] |= 0x80; buf[3] |= 0x80; break;
-        case 2:                                         buf[2] |= 0x80; buf[3] |= 0x80; break;
-        case 3:                                                             buf[3] |= 0x80; break;
-        case 4: break;
-    }
-}
-
-static void _decodeAlarm2Mode(uint8_t *buf, uint8_t &mode, uint8_t &dayOrDate, bool &isDayOfWeek) {
-    bool a2m2 = (buf[0] >> 7) & 1;
-    bool a2m3 = (buf[1] >> 7) & 1;
-    bool a2m4 = (buf[2] >> 7) & 1;
-    isDayOfWeek = (buf[2] >> 6) & 1;
-
-    if (a2m2 && a2m3 && a2m4)              { mode = 0; }
-    else if (!a2m2 && a2m3 && a2m4)         { mode = 1; }
-    else if (!a2m2 && !a2m3 && a2m4)         { mode = 2; }
-    else                                      { mode = 3; }
-
-    dayOrDate = _bcd2dec(buf[2] & 0x3F);
-}
-
-static void _encodeAlarm2Mode(uint8_t *buf, uint8_t min, uint8_t hour, uint8_t mode, uint8_t dayOrDate, bool isDayOfWeek) {
-    buf[0] = _dec2bcd(min);
-    buf[1] = _dec2bcd(hour);
-    buf[2] = _dec2bcd(dayOrDate);
-    if (isDayOfWeek) { buf[2] |= 0x40; }
-
-    switch (mode) {
-        case 0: buf[0] |= 0x80; buf[1] |= 0x80; buf[2] |= 0x80; break;
-        case 1:                     buf[1] |= 0x80; buf[2] |= 0x80; break;
-        case 2:                                         buf[2] |= 0x80; break;
-        case 3: break;
-    }
-}
-
-#if defined(ESP32)
-// Форматирование времени срабатывания: YYYY-MM-DD HH:MM:SS. Если время
-// недостоверно (t==0, например OSF), возвращаем пометку "time invalid".
-static void _formatAlarmTime(time_t t, String &out) {
-    if (t == 0) { out = "(time invalid)"; return; }
-    String dt = "";
-    dt += String(year(t)) + "-";
-    if (month(t) < 10) { dt += "0"; }
-    dt += String(month(t)) + "-";
-    if (day(t) < 10) { dt += "0"; }
-    dt += String(day(t)) + " ";
-    if (hour(t) < 10) { dt += "0"; }
-    dt += String(hour(t)) + ":";
-    if (minute(t) < 10) { dt += "0"; }
-    dt += String(minute(t)) + ":";
-    if (second(t) < 10) { dt += "0"; }
-    dt += String(second(t));
-    out = dt;
-}
-
-// Форматирование штампа времени срабатывания для отображения.
-// Если времени нет (t==0 — не срабатывал), возвращаем "--".
-static void _formatAlarmStamp(time_t t, String &out) {
-    if (t == 0) { out = "--"; return; }
-    _formatAlarmTime(t, out);
 }
 #endif
 
@@ -994,12 +886,12 @@ time_t CLASS_MODULE_DS3231::_readTime() {
     uint8_t buf[7];
     if (!_readBlock(0x00, buf, 7)) { return 0; }
 
-    uint8_t sec   = _bcd2dec(buf[0] & 0x7F);
-    uint8_t min   = _bcd2dec(buf[1]);
-    uint8_t hour  = _bcd2dec(buf[2] & 0x3F);
-    uint8_t day   = _bcd2dec(buf[4]);
-    uint8_t mon   = _bcd2dec(buf[5] & 0x1F);
-    uint16_t yr   = _bcd2dec(buf[6]) + 2000;
+    uint8_t sec   = ns_module_ds3231::_bcd2dec(buf[0] & 0x7F);
+    uint8_t min   = ns_module_ds3231::_bcd2dec(buf[1]);
+    uint8_t hour  = ns_module_ds3231::_bcd2dec(buf[2] & 0x3F);
+    uint8_t day   = ns_module_ds3231::_bcd2dec(buf[4]);
+    uint8_t mon   = ns_module_ds3231::_bcd2dec(buf[5] & 0x1F);
+    uint16_t yr   = ns_module_ds3231::_bcd2dec(buf[6]) + 2000;
 
     tmElements_t tm;
     tm.Year   = yr - 1970;
@@ -1016,13 +908,13 @@ bool CLASS_MODULE_DS3231::_writeTime(time_t t) {
     breakTime(t, tm);
 
     uint8_t buf[7];
-    buf[0] = _dec2bcd(tm.Second) & 0x7F;
-    buf[1] = _dec2bcd(tm.Minute);
-    buf[2] = _dec2bcd(tm.Hour);
-    buf[3] = _dec2bcd(weekday(t));
-    buf[4] = _dec2bcd(tm.Day);
-    buf[5] = _dec2bcd(tm.Month);
-    buf[6] = _dec2bcd((tm.Year + 1970) - 2000);
+    buf[0] = ns_module_ds3231::_dec2bcd(tm.Second) & 0x7F;
+    buf[1] = ns_module_ds3231::_dec2bcd(tm.Minute);
+    buf[2] = ns_module_ds3231::_dec2bcd(tm.Hour);
+    buf[3] = ns_module_ds3231::_dec2bcd(weekday(t));
+    buf[4] = ns_module_ds3231::_dec2bcd(tm.Day);
+    buf[5] = ns_module_ds3231::_dec2bcd(tm.Month);
+    buf[6] = ns_module_ds3231::_dec2bcd((tm.Year + 1970) - 2000);
     return _writeBlock(0x00, buf, 7);
 }
 
@@ -1033,17 +925,17 @@ bool CLASS_MODULE_DS3231::_writeTime(time_t t) {
 bool CLASS_MODULE_DS3231::getAlarm1(uint8_t &hour, uint8_t &min, uint8_t &sec, uint8_t &mode, uint8_t &dayOrDate, bool &isDayOfWeek) {
     uint8_t buf[4];
     if (!_readBlock(0x07, buf, 4)) { return false; }
-    sec  = _bcd2dec(buf[0] & 0x7F);
-    min  = _bcd2dec(buf[1] & 0x7F);
-    hour = _bcd2dec(buf[2] & 0x3F);
-    _decodeAlarm1Mode(buf, mode, dayOrDate, isDayOfWeek);
+    sec  = ns_module_ds3231::_bcd2dec(buf[0] & 0x7F);
+    min  = ns_module_ds3231::_bcd2dec(buf[1] & 0x7F);
+    hour = ns_module_ds3231::_bcd2dec(buf[2] & 0x3F);
+    ns_module_ds3231::_decodeAlarm1Mode(buf, mode, dayOrDate, isDayOfWeek);
     return true;
 }
 
 bool CLASS_MODULE_DS3231::setAlarm1(uint8_t hour, uint8_t min, uint8_t sec, uint8_t mode, uint8_t dayOrDate, bool isDayOfWeek) {
     if (mode > 4) { mode = 4; }
     uint8_t buf[4];
-    _encodeAlarm1Mode(buf, sec, min, hour, mode, dayOrDate, isDayOfWeek);
+    ns_module_ds3231::_encodeAlarm1Mode(buf, sec, min, hour, mode, dayOrDate, isDayOfWeek);
     bool ok = _writeBlock(0x07, buf, 4);
     if (ok) {
         // Разрешаем прерывание Alarm 1 (A1IE) только когда выход настроен на
@@ -1068,16 +960,16 @@ bool CLASS_MODULE_DS3231::setAlarm1(uint8_t hour, uint8_t min, uint8_t sec, uint
 bool CLASS_MODULE_DS3231::getAlarm2(uint8_t &hour, uint8_t &min, uint8_t &mode, uint8_t &dayOrDate, bool &isDayOfWeek) {
     uint8_t buf[3];
     if (!_readBlock(0x0B, buf, 3)) { return false; }
-    min  = _bcd2dec(buf[0] & 0x7F);
-    hour = _bcd2dec(buf[1] & 0x3F);
-    _decodeAlarm2Mode(buf, mode, dayOrDate, isDayOfWeek);
+    min  = ns_module_ds3231::_bcd2dec(buf[0] & 0x7F);
+    hour = ns_module_ds3231::_bcd2dec(buf[1] & 0x3F);
+    ns_module_ds3231::_decodeAlarm2Mode(buf, mode, dayOrDate, isDayOfWeek);
     return true;
 }
 
 bool CLASS_MODULE_DS3231::setAlarm2(uint8_t hour, uint8_t min, uint8_t mode, uint8_t dayOrDate, bool isDayOfWeek) {
     if (mode > 3) { mode = 3; }
     uint8_t buf[3];
-    _encodeAlarm2Mode(buf, min, hour, mode, dayOrDate, isDayOfWeek);
+    ns_module_ds3231::_encodeAlarm2Mode(buf, min, hour, mode, dayOrDate, isDayOfWeek);
     bool ok = _writeBlock(0x0B, buf, 3);
     if (ok) {
         // Разрешаем прерывание Alarm 2 (A2IE) только когда выход настроен на
@@ -1228,7 +1120,7 @@ void CLASS_MODULE_DS3231::_handleAlarmFired(uint8_t alarmNum, uint8_t mode,
                                             uint8_t dayOrDate, bool isDayOfWeek) {
     time_t t = _readTime();
     String when;
-    _formatAlarmTime(t, when);
+    ns_module_ds3231::_formatAlarmTime(t, when);
 
     // Сохраняем время последнего срабатывания (для всех режимов, включая mode=0).
     // Не сбрасывается при setAlarm1/setAlarm2 — обновляется только фактической сработкой.
@@ -1315,11 +1207,11 @@ void ds3231CmdAlarm() {
 #if defined(ESP32)
     // Время последнего срабатывания (сохранённое в RAM).
     if (module_ds3231.getLastAlarm1Time() != 0) {
-        String s; _formatAlarmStamp(module_ds3231.getLastAlarm1Time(), s);
+        String s; ns_module_ds3231::_formatAlarmStamp(module_ds3231.getLastAlarm1Time(), s);
         DEBUGDS3231("DS3231: Alarm 1 last fired: %s\r\n", s.c_str());
     }
     if (module_ds3231.getLastAlarm2Time() != 0) {
-        String s; _formatAlarmStamp(module_ds3231.getLastAlarm2Time(), s);
+        String s; ns_module_ds3231::_formatAlarmStamp(module_ds3231.getLastAlarm2Time(), s);
         DEBUGDS3231("DS3231: Alarm 2 last fired: %s\r\n", s.c_str());
     }
     if (module_ds3231.getLastAlarm1Time() == 0 && module_ds3231.getLastAlarm2Time() == 0) {
