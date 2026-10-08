@@ -216,7 +216,7 @@ uint8_t CLASS_MODULE_DS3231::_scanForDS3231() {
         ESP.wdtFeed();
 #endif
         if (_detectDS3231(addr)) {
-            DEBUGDS3231("DS3231: найдено устройство по адресу 0x%02X\r\n", addr);
+            DEBUGDS3231("DS3231: 0x%02X\r\n", addr);
             return addr;
         }
     }
@@ -261,7 +261,14 @@ bool CLASS_MODULE_DS3231::_writeTime(time_t t) {
     buf[4] = ns_module_ds3231::_dec2bcd(tm.Day);
     buf[5] = ns_module_ds3231::_dec2bcd(tm.Month);
     buf[6] = ns_module_ds3231::_dec2bcd((tm.Year + 1970) - 2000);
-    return _writeBlock(0x00, buf, 7);
+    bool ok = _writeBlock(0x00, buf, 7);
+    if (ok) {
+        // Время установлено — сбрасываем OSF (0x0F bit7): осциллятор остановлен,
+        // но время теперь достоверно. Без этого без батарейки RTC остаётся «osf» навсегда.
+        uint8_t stat = _readReg(0x0F);
+        if (stat & 0x80) { _writeReg(0x0F, stat & 0x7F); }
+    }
+    return ok;
 }
 
 // ============================================================

@@ -1,72 +1,61 @@
-# module_ds3231 — часы реального времени DS3231
+# module_ds3231 — RTC DS3231
 
 > **Опциональный модуль.** Подключается через `src_filter` + `build_flags`.
-> **Работоспособен только в составе сборки, содержащей ядро** (см. `../../TRS.md` §2.1).
-
-Драйвер RTC DS3231 по I2C: чтение и установка времени, будильники Alarm1/Alarm2,
-температура, регистры управления/статуса, мониторинг вывода SQW/INT# (ESP32).
+> **Работоспособен только в составе сборки, содержащей ядро.**
 
 - **Репозиторий:** https://github.com/Arcanum753/module_ds3231
 - **Папка:** `src/module_ds3231/`
-- **Флаг активации:** `-D MODULE_DS3231` (в env встречается `-D MODULE_DS3231=1`)
-- **Registry:** `object=module_ds3231`, `define=MODULE_DS3231`, `web=1`, `loop=0` (без `namespace`/`res`/`prio`)
-- **Только для платформы:** обе (ESP8266/ESP32); SQW/прерывание — только ESP32
-- **Зависит от модулей:** —
-- **Зависит от ядра:** `core_web`, `core_sys`, `core_json`, `core_ntp` (источник времени), `core_led`
+- **Флаг активации:** `-D MODULE_DS3231`
+- **Registry:** `object=module_ds3231`, `define=MODULE_DS3231`, `web=1`, `loop=0`,
+  `time_source=1`
+- **Зависит от ядра:** `core_web`, `core_sys`, `core_state`, `core_json`, `core_terminal`
 
 ## Назначение
 
-RTC DS3231 по I2C: чтение/установка времени, Alarm1/Alarm2, температура, регистры
-управления/статуса, мониторинг SQW/INT# (ESP32).
+Часы реального времени DS3231 (I2C), будильники и выход SQW (`DS3231_SQW_PIN`).
+Конфиг `/config_ds3231.json`; страница `ds3231.html`.
 
-## Функциональные требования
+## Источник времени: эталон с записью
 
-- FR-DS3231-1: Чтение/установка времени (`getTime`, `setTime`), проверка связи (`isConnected`, `getAddr`, `getLastError`).
-- FR-DS3231-2: Будильники Alarm1/Alarm2 (`getAlarm1/setAlarm1`, `getAlarm2/setAlarm2`), фиксация срабатывания (`getAlarmFired1/2`, `getLastAlarm1/2Time`).
-- FR-DS3231-3: Температура (`getTemperature`), регистр статуса (`getStatusReg`).
-- FR-DS3231-4: SQW-вывод (ESP32): `sqwGpioInit/Reinit/Stop`, `sqwEnable/DisableInterrupt`, `getSqwLevel`; пин `DS3231_SQW_PIN=13`.
-- FR-DS3231-5: Конфиг `/config_ds3231.json`: `addr`, `autoPoll`, `pollInterval`, `sqwEnabled`, `sqwMode`, `sqwLevelActive`, `ctrlBbsqw`, `ctrlRs`, `ctrlIntcn`, `ctrlA1ie`, `ctrlA2ie`.
+`module_ds3231` — **источник времени** для `core_sys` и поддерживает **запись** (обратная
+синхронизация RTC). Не владеет `time.*` и TZ/DST.
 
-## Аппаратные интерфейсы
+```cpp
+static bool ds3231GetTime(time_t& out) {
+    if (!module_ds3231.isConnected()) return false;
+    time_t t = (time_t)module_ds3231.getTime();   // одна I2C-операция
+    if (t < CORE_SYS_TIME_MIN_VALID) return false;
+    out = t; return true;
+}
+static bool ds3231SetTime(time_t in) { return module_ds3231.setTime((time_t)in); }
+static const char* ds3231Status() {
+    if (!module_ds3231.isConnected()) return "not connected";
+    if (module_ds3231.getStatusReg() & 0x80) return "osf (battery low?)";
+    return "";
+}
 
-| Интерфейс | Выводы по умолчанию | Примечание |
-|-----------|---------------------|------------|
-| I2C (DS3231) | ESP32 21/22, ESP8266 4/5 (SDA/SCL) | адрес задаётся в `config_ds3231.json` (`addr`) |
-| DS3231 SQW/INT# | 13 (`DS3231_SQW_PIN`) | только ESP32; используется `device_clock-mech`/`device_mech-ring` |
+void CLASS_MODULE_DS3231::registerTimeSource() {
+    core_sys.addTimeSource("ds3231", 50, ds3231GetTime, ds3231SetTime, ds3231Status);
+}
+```
 
-## Веб-интерфейс
+| Параметр | Значение |
+|---|---|
+| Имя источника | `ds3231` |
+| Приоритет | `50` |
+| Критерий валидности `get()` | `isConnected() && t ≥ 2020-01-01` (OSF диагностируется в `status()`) |
+| `set()` | `setTime(in)` — поддерживается; при успешной записи времени сбрасывает OSF (`0x0F` bit7) |
+| `status()` | `"not connected"` / `"osf (battery low?)"` |
 
-Маршруты: `GET /ds3231/read`, `/ds3231/poll`, `POST /ds3231/set_time`, `/ds3231/set_alarm1`,
-`/ds3231/set_alarm2`, `/ds3231/set_reg`, `/ds3231/save`, `GET /ds3231/info`, `/ds3231/ver`.
+`ds3231GetTime()` — **одна I2C-транзакция** (без отдельного `getStatusReg()`); диагностика OSF
+вызывается в `status()` только при невалидном источнике.
 
-## Конфигурация
+Установка времени (`setTime` → `_writeTime`) после успешной записи регистров времени очищает бит
+OSF: время, записанное вручную, считается достоверным. Поэтому после `time.set` / RTC-обратной
+синхронизации источник `ds3231` перестаёт быть «osf» (важно для RTC без батарейки).
 
-`/config_ds3231.json` — поля: см. FR-DS3231-5. `addr` — I2C-адрес DS3231 (обычно `0x68`).
-
-## Терминальные команды
-
-| Команда | Назначение | Доступность |
-|---------|-----------|-------------|
-| `ds-alarm` / `ds-sqw` / `ds-sqr` | отладка DS3231 | только `MODULE_DS3231` |
-
-## Слоистая структура
-
-Из `../../LAYERS.md`: `module_ds3231` — RTC: время, будильники, SQW/GPIO, ISR; сейчас типы +
-крупная логика в `.cpp`; выделить `_types.h`, `_engine.cpp`. Локальные stateless-хелперы
-(BCD/alarm) — в `common_module.*`, namespace `ns_module_ds3231`.
+TZ/DST теперь в `config_time.json` (владелец `core_sys`, секция «Time Sources» на `system.html`), не в конфиге/странице DS3231.
 
 ## Тестирование
 
-- HIL-стенд (уровень 5): чтение/установка времени, будильники, температура на реальном
-  чипе DS3231 на шине I2C (см. `../../TESTING.md`).
-
-## Ссылки
-
-- Ядро и конвенции: `../../TRS.md`
-- Слоистая структура: `../../LAYERS.md`
-- Общие утилиты: `../../TRS.md` §3.1.12 (`common/`)
-- Сборка: `../../BUILD.md`
-- Реестр компонентов: `../../INVENTORY.md`
-
-> Если модуль читается вне дерева ядра (standalone), корневые документы доступны в
-> репозитории ядра avr-fota.
+Автотесты — в репозитории `module_ds3231` (вне ядра).

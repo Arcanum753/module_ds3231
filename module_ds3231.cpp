@@ -6,6 +6,7 @@
 
 #include "core_json/core_json.h"
 #include "core_ntp/NtpClientLib.h"
+#include "core_sys/core_sys.h"
 #include "core_terminal/core_terminal.h"
 #include "core_terminal/ErriezSerialTerminal.h"
 
@@ -30,6 +31,28 @@ CLASS_MODULE_DS3231::CLASS_MODULE_DS3231() {
     _lastAlarm2At = 0;
     _sqwInterrupting = false;
 #endif
+}
+
+// ============================================================
+// Time Source Provider API — колбэки для core_sys
+// ============================================================
+
+static bool ds3231GetTime(time_t& out) {
+    if (!module_ds3231.isConnected()) { return false; }
+    time_t t = (time_t)module_ds3231.getTime();   // одна I2C-операция
+    if (t < CORE_SYS_TIME_MIN_VALID) { return false; }
+    out = t;
+    return true;
+}
+
+static bool ds3231SetTime(time_t in) {
+    return module_ds3231.setTime((time_t)in);
+}
+
+static const char* ds3231Status() {
+    if (!module_ds3231.isConnected()) { return "not connected"; }
+    if (module_ds3231.getStatusReg() & 0x80) { return "osf (battery low?)"; }
+    return "";
 }
 
 #if defined(ESP32)
@@ -142,6 +165,14 @@ void CLASS_MODULE_DS3231::web_Init() {
     ESPHTTPServer.on("/ds3231/ver", HTTP_GET, [this](AsyncWebServerRequest *request) {
         this->html_ver_get(request);
     });
+}
+
+// ============================================================
+// Источник времени для core_sys (Time Source Provider API)
+// ============================================================
+
+void CLASS_MODULE_DS3231::registerTimeSource() {
+    core_sys.addTimeSource("ds3231", 50, ds3231GetTime, ds3231SetTime, ds3231Status);
 }
 
 // ============================================================

@@ -30,6 +30,7 @@ public:
     void begin();
     void begin(ModContext& ctx);
     void web_Init();
+    void registerTimeSource();   // Time Source Provider API (core_sys)
 
     // ===== Публичное API для других модулей =====
     time_t getTime();
