@@ -3,6 +3,7 @@
 <head>
     <title>DS3231 RTC</title>
     <meta http-equiv="Content-type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,7 +12,7 @@
 
     <!-- Статус подключения -->
     <div class="content" style="text-align: center;">
-        <table class="scan" style="width: auto; margin: 0 auto;">
+        <table class="scan">
             <tr><th>Состояние / Status</th></tr>
             <tr><td style="padding: 8px; font-size: 1.1em;">
                 <span id="ds_state" style="font-weight:bold;">--</span>
@@ -26,7 +27,7 @@
 
     <!-- Время и дата -->
     <div class="content" style="text-align: center;">
-        <table class="scan" style="width: auto; margin: 0 auto;">
+        <table class="scan">
             <tr><th colspan="2">Время и дата / Time &amp; Date</th></tr>
             <tr><td colspan="2" style="padding: 10px; font-size: 1.3em;"><span id="ds_time">--</span></td></tr>
             <tr><td colspan="2" style="padding: 6px;">
@@ -48,20 +49,6 @@
 
     <!-- Будильники — горизонтально -->
     <div class="content" style="text-align: center;">
-        <table class="scan">
-            <tr><th>Как настроить будильник</th></tr>
-            <tr><td style="text-align: left; padding: 10px; font-size: 0.92em; line-height: 1.6;">
-                <b>Alarm 1 (с секундами).</b> Задайте <i>Час / Минута / Секунда</i> и выберите «Режим» — он определяет, какие поля сравниваются с текущим временем:
-                <br>&nbsp;• 0 · Раз в секунду — срабатывает каждую секунду (поля не важны);
-                <br>&nbsp;• 1 · По секундам — раз в минуту, когда совпали секунды;
-                <br>&nbsp;• 2 · По минутам:секундам — ежечасно, когда совпали минуты и секунды;
-                <br>&nbsp;• 3 · По часам:минутам:секундам — ежедневно в указанное время;
-                <br>&nbsp;• 4 · По дню/дате + время — в заданный день недели или число месяца в указанное время.
-                <br><b>Alarm 2 (без секунд).</b> Микросхема DS3231 не хранит секунды для Alarm 2 (регистры будильника 2 содержат только минуты, часы и день/дату), поэтому поля «Секунды» здесь нет. Режимы аналогичны, но без секунд: раз в минуту / по минутам / по часам:минутам / по дню/дате + время.
-                <br><b>День/Дата и «День недели».</b> Если включён чекбокс «День недели», значение поля «День/Дата» трактуется как день недели (1=воскресенье … 7=суббота по DS3231). Если выключен — как число месяца (1–31). Для режимов «раз в …» и обычных масок совпадения день не используется.
-                <br>После заполнения нажмите <b>«Установить»</b>.
-            </td></tr>
-        </table>
         <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
             <!-- Будильник 1 -->
             <table class="scan" style="width: auto; margin: 0;">
@@ -112,7 +99,7 @@
 
     <!-- Регистры управления -->
     <div class="content" style="text-align: center;">
-        <table class="scan" style="width: auto; margin: 0 auto;">
+        <table class="scan">
             <tr><th colspan="2">Регистры управления / Control Registers</th></tr>
             <tr>
                 <td class="label">Control (0x0E)</td>
@@ -127,27 +114,15 @@
                 <input type="button" value="Записать регистры" class="button-prog" onclick="setReg()">
                 <span id="regStatus" style="margin-left:8px;font-size:12px;"></span>
             </td></tr>
-            <tr><th colspan="3">Биты Control (0x0E) — описание</th></tr>
-            <tr><td class="label">EOSC</td><td><span id="ds_ctrl_eosc">0</span></td><td style="text-align:left;font-size:0.9em;">1=останов генератора, чип переходит в спящий режим (энергосбережение)</td></tr>
-            <tr><td class="label">BBSQW</td><td><span id="ds_ctrl_bbsqw">0</span></td><td style="text-align:left;font-size:0.9em;">1=выход SQW выдаёт меандр (частоту из RS), 0=INT# сигнал (приоритет INTCN)</td></tr>
-            <tr><td class="label">CONV</td><td><span id="ds_ctrl_conv">0</span></td><td style="text-align:left;font-size:0.9em;">1=принудительное начать преобразование температуры (BSY=1 пока идёт)</td></tr>
-            <tr><td class="label">RS[1:0]</td><td><span id="ds_ctrl_rs">0</span></td><td style="text-align:left;font-size:0.9em;">Частота SQW: 0=1Гц, 1=1.024кГц, 2=4.096кГц, 3=8.192кГц</td></tr>
-            <tr><td class="label">INTCN</td><td><span id="ds_ctrl_intcn">0</span></td><td style="text-align:left;font-size:0.9em;">1=INT# по будильникам, 0=INT# как SQW (если BBSQW=0)</td></tr>
-            <tr><td class="label">A2IE</td><td><span id="ds_ctrl_a2ie">0</span></td><td style="text-align:left;font-size:0.9em;">1=разрешить прерывание от Alarm 2 на INT#</td></tr>
-            <tr><td class="label">A1IE</td><td><span id="ds_ctrl_a1ie">0</span></td><td style="text-align:left;font-size:0.9em;">1=разрешить прерывание от Alarm 1 на INT#</td></tr>
-            <tr><th colspan="3">Биты Status (0x0F) — описание</th></tr>
-            <tr><td class="label">OSF</td><td><span id="ds_stat_osf">0</span></td><td style="text-align:left;font-size:0.9em;">1=осциллятор остановлен (пропало питание, сброс после установки времени)</td></tr>
-            <tr><td class="label">EN32kHz</td><td><span id="ds_stat_en32khz">0</span></td><td style="text-align:left;font-size:0.9em;">1=включить выход 32.768кГц на ножку 32kHz</td></tr>
-            <tr><td class="label">BSY</td><td><span id="ds_stat_bsy">0</span></td><td style="text-align:left;font-size:0.9em;">1=идёт преобразование температуры (~2мс), запись в регистры заблокирована</td></tr>
-            <tr><td class="label">A2F</td><td><span id="ds_stat_a2f">0</span></td><td style="text-align:left;font-size:0.9em;">1=флаг срабатывания Alarm 2 (сбросить записью 0)</td></tr>
-            <tr><td class="label">A1F</td><td><span id="ds_stat_a1f">0</span></td><td style="text-align:left;font-size:0.9em;">1=флаг срабатывания Alarm 1 (сбросить записью 0)</td></tr>
         </table>
     </div>
 
-    <!-- Автоопрос -->
+    <!-- Управление: автоопрос / SQW / режим выхода — одним рядом -->
     <div class="content" style="text-align: center;">
-        <table class="scan" style="width: auto; margin: 0 auto;">
-            <tr><th colspan="2">Автоопрос / Auto-poll</th></tr>
+        <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
+            <!-- Автоопрос -->
+            <table class="scan" style="width: auto; margin: 0;">
+                <tr><th colspan="2">Автоопрос / Auto-poll</th></tr>
             <tr>
                 <td class="label">Включить</td>
                 <td><input type="checkbox" id="ds_autoPoll" onclick="toggleAutoPoll()"></td>
@@ -160,13 +135,10 @@
                 <input type="button" value="Сохранить" class="button-prog" onclick="savePollConfig()">
                 <span id="pollStatus" style="margin-left:8px;font-size:12px;"></span>
             </td></tr>
-        </table>
-    </div>
-
-    <!-- SQW / GPIO (только ESP32) -->
-    <div class="content" style="text-align: center;">
-        <table class="scan" style="width: auto; margin: 0 auto;">
-            <tr><th colspan="2">Вывод SQW / INT# (GPIO)</th></tr>
+            </table>
+            <!-- SQW / GPIO (только ESP32) -->
+            <table class="scan" style="width: auto; margin: 0;">
+                <tr><th colspan="2">Вывод SQW / INT# (GPIO)</th></tr>
             <tr>
                 <td class="label">Включить мониторинг</td>
                 <td><input type="checkbox" id="ds_sqw_enabled"></td>
@@ -201,13 +173,10 @@
                 <input type="button" value="Сохранить" class="button-prog" onclick="saveSqwConfig()">
                 <span id="sqwStatus" style="margin-left:8px;font-size:12px;"></span>
             </td></tr>
-        </table>
-    </div>
-
-    <!-- Режим выхода SQW (Control 0x0E) -->
-    <div class="content" style="text-align: center;">
-        <table class="scan" style="width: auto; margin: 0 auto;">
-            <tr><th colspan="2">Режим выхода SQW (Control 0x0E)</th></tr>
+            </table>
+            <!-- Режим выхода SQW (Control 0x0E) -->
+            <table class="scan" style="width: auto; margin: 0;">
+                <tr><th colspan="2">Режим выхода SQW (Control 0x0E)</th></tr>
             <tr>
                 <td class="label">BBSQW / INTCN</td>
                 <td>
@@ -236,6 +205,43 @@
                 <input type="button" value="Записать биты Control" class="button-prog" onclick="setCtrlBits()">
                 <span id="ctrlBitsStatus" style="margin-left:8px;font-size:12px;"></span>
             </td></tr>
+            </table>
+        </div>
+    </div>
+
+    <!-- Описание / Reference: все подсказки внизу страницы -->
+    <div class="content" style="text-align: center;">
+        <table class="scan">
+            <tr><th>Как настроить будильник</th></tr>
+            <tr><td style="text-align: left; padding: 10px; font-size: 0.92em; line-height: 1.6;">
+                <b>Alarm 1 (с секундами).</b> Задайте <i>Час / Минута / Секунда</i> и выберите «Режим» — он определяет, какие поля сравниваются с текущим временем:
+                <br>&nbsp;• 0 · Раз в секунду — срабатывает каждую секунду (поля не важны);
+                <br>&nbsp;• 1 · По секундам — раз в минуту, когда совпали секунды;
+                <br>&nbsp;• 2 · По минутам:секундам — ежечасно, когда совпали минуты и секунды;
+                <br>&nbsp;• 3 · По часам:минутам:секундам — ежедневно в указанное время;
+                <br>&nbsp;• 4 · По дню/дате + время — в заданный день недели или число месяца в указанное время.
+                <br><b>Alarm 2 (без секунд).</b> Микросхема DS3231 не хранит секунды для Alarm 2 (регистры будильника 2 содержат только минуты, часы и день/дату), поэтому поля «Секунды» здесь нет. Режимы аналогичны, но без секунд: раз в минуту / по минутам / по часам:минутам / по дню/дате + время.
+                <br><b>День/Дата и «День недели».</b> Если включён чекбокс «День недели», значение поля «День/Дата» трактуется как день недели (1=воскресенье … 7=суббота по DS3231). Если выключен — как число месяца (1–31). Для режимов «раз в …» и обычных масок совпадения день не используется.
+                <br>После заполнения нажмите <b>«Установить»</b>.
+            </td></tr>
+        </table>
+        <table class="scan">
+            <tr><th colspan="3">Биты Control (0x0E) — описание</th></tr>
+            <tr><td class="label">EOSC</td><td><span id="ds_ctrl_eosc">0</span></td><td style="text-align:left;font-size:0.9em;">1=останов генератора, чип переходит в спящий режим (энергосбережение)</td></tr>
+            <tr><td class="label">BBSQW</td><td><span id="ds_ctrl_bbsqw">0</span></td><td style="text-align:left;font-size:0.9em;">1=выход SQW выдаёт меандр (частоту из RS), 0=INT# сигнал (приоритет INTCN)</td></tr>
+            <tr><td class="label">CONV</td><td><span id="ds_ctrl_conv">0</span></td><td style="text-align:left;font-size:0.9em;">1=принудительное начать преобразование температуры (BSY=1 пока идёт)</td></tr>
+            <tr><td class="label">RS[1:0]</td><td><span id="ds_ctrl_rs">0</span></td><td style="text-align:left;font-size:0.9em;">Частота SQW: 0=1Гц, 1=1.024кГц, 2=4.096кГц, 3=8.192кГц</td></tr>
+            <tr><td class="label">INTCN</td><td><span id="ds_ctrl_intcn">0</span></td><td style="text-align:left;font-size:0.9em;">1=INT# по будильникам, 0=INT# как SQW (если BBSQW=0)</td></tr>
+            <tr><td class="label">A2IE</td><td><span id="ds_ctrl_a2ie">0</span></td><td style="text-align:left;font-size:0.9em;">1=разрешить прерывание от Alarm 2 на INT#</td></tr>
+            <tr><td class="label">A1IE</td><td><span id="ds_ctrl_a1ie">0</span></td><td style="text-align:left;font-size:0.9em;">1=разрешить прерывание от Alarm 1 на INT#</td></tr>
+        </table>
+        <table class="scan">
+            <tr><th colspan="3">Биты Status (0x0F) — описание</th></tr>
+            <tr><td class="label">OSF</td><td><span id="ds_stat_osf">0</span></td><td style="text-align:left;font-size:0.9em;">1=осциллятор остановлен (пропало питание, сброс после установки времени)</td></tr>
+            <tr><td class="label">EN32kHz</td><td><span id="ds_stat_en32khz">0</span></td><td style="text-align:left;font-size:0.9em;">1=включить выход 32.768кГц на ножку 32kHz</td></tr>
+            <tr><td class="label">BSY</td><td><span id="ds_stat_bsy">0</span></td><td style="text-align:left;font-size:0.9em;">1=идёт преобразование температуры (~2мс), запись в регистры заблокирована</td></tr>
+            <tr><td class="label">A2F</td><td><span id="ds_stat_a2f">0</span></td><td style="text-align:left;font-size:0.9em;">1=флаг срабатывания Alarm 2 (сбросить записью 0)</td></tr>
+            <tr><td class="label">A1F</td><td><span id="ds_stat_a1f">0</span></td><td style="text-align:left;font-size:0.9em;">1=флаг срабатывания Alarm 1 (сбросить записью 0)</td></tr>
         </table>
     </div>
 
@@ -390,17 +396,20 @@
                 const id = parts[0].trim();
                 const val = parts[1];
                 const type = parts.length >= 3 ? parts[2].trim() : 'div';
-                const el = document.getElementById(id);
-                if (!el) { continue; }
-                // SELECT и элементы типа select нельзя заполнять через innerText —
-                // это удаляет все <option>. Задаём только value.
-                if (type === 'select' || el.tagName === 'SELECT') {
-                    el.value = val;
-                } else if (type === 'chk') {
-                    el.checked = (val === 'checked');
-                } else {
-                    el.innerText = val;
-                    if (el.tagName === 'INPUT') { el.value = val; }
+                // Обновляем ВСЕ элементы с этим id: в разметке есть дубли
+                // (функциональное поле и строка-описание под одним id).
+                const els = document.querySelectorAll('[id="' + id + '"]');
+                for (const el of els) {
+                    // SELECT нельзя заполнять через innerText — это удаляет <option>.
+                    if (type === 'select' || el.tagName === 'SELECT') {
+                        el.value = val;
+                    } else if (type === 'chk') {
+                        el.checked = (val === 'checked');
+                    } else if (el.tagName === 'INPUT') {
+                        el.value = val;
+                    } else {
+                        el.innerText = val;
+                    }
                 }
             }
             updateStateColor();
