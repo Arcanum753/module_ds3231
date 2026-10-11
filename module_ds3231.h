@@ -143,6 +143,9 @@ void ds3231SqwIsr();                 // ISR для attachInterrupt
 void ds3231SqwPollTask();            // периодическая задача опроса
 #endif
 
+// Канонический ли адрес (0x68 — DS3231, 0x57 — DS32B35/DS32C35)
+bool ds3231IsCanonicalAddr(uint8_t addr);
+
 // Терминальные команды модуля (регистрируются через TerminalRegisterModule)
 void ds3231TerminalRegister();
 

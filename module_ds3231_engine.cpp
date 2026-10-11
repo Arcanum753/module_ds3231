@@ -172,6 +172,11 @@ bool CLASS_MODULE_DS3231::_writeBlock(uint8_t reg, uint8_t *buf, uint8_t len) {
 // Детекция DS3231
 // ============================================================
 
+// Проверка, что байт — корректный BCD (обе тетрады ≤ 9)
+static bool ds3231BcdValid(uint8_t v) {
+    return ((v >> 4) <= 9) && ((v & 0x0F) <= 9);
+}
+
 bool CLASS_MODULE_DS3231::_detectDS3231(uint8_t addr) {
     Wire.beginTransmission(addr);
     uint8_t err = Wire.endTransmission();
@@ -194,6 +199,8 @@ bool CLASS_MODULE_DS3231::_detectDS3231(uint8_t addr) {
     uint8_t ctrl = Wire.read();
 
     if (ctrl == 0xFF || stat == 0xFF) { return false; }
+    // Зарезервированные биты Status (0x0F, биты 6..4) всегда 0 у DS3231.
+    if (stat & 0x70) { return false; }
 
     Wire.beginTransmission(addr);
     Wire.write(0x11);
@@ -204,20 +211,59 @@ bool CLASS_MODULE_DS3231::_detectDS3231(uint8_t addr) {
     int8_t tempUpper = (int8_t)Wire.read();
     if (tempUpper < -40 || tempUpper > 85) { return false; }
 
+    // Регистры времени (0x00..0x06) должны содержать корректный BCD в допустимых
+    // диапазонах — защита от ложного определения чужого I2C-устройства.
+    Wire.beginTransmission(addr);
+    Wire.write(0x00);
+    err = Wire.endTransmission();
+    if (err != 0) { return false; }
+    Wire.requestFrom((int)addr, 7);
+    if (Wire.available() < 7) { return false; }
+    uint8_t t[7];
+    for (uint8_t i = 0; i < 7; i++) { t[i] = Wire.read(); }
+
+    uint8_t sec  = t[0] & 0x7F;
+    uint8_t min  = t[1] & 0x7F;
+    uint8_t hour = t[2] & 0x3F;
+    uint8_t dow  = t[3] & 0x07;
+    uint8_t day  = t[4] & 0x3F;
+    uint8_t mon  = t[5] & 0x1F;
+    uint8_t yr   = t[6];
+
+    if (!ds3231BcdValid(sec) || !ds3231BcdValid(min) || !ds3231BcdValid(hour)) { return false; }
+    if (ns_module_ds3231::_bcd2dec(sec)  > 59) { return false; }
+    if (ns_module_ds3231::_bcd2dec(min)  > 59) { return false; }
+    if (ns_module_ds3231::_bcd2dec(hour) > 23) { return false; }
+    if (dow < 1 || dow > 7) { return false; }
+    if (!ds3231BcdValid(day) || ns_module_ds3231::_bcd2dec(day) < 1 || ns_module_ds3231::_bcd2dec(day) > 31) { return false; }
+    if (!ds3231BcdValid(mon) || ns_module_ds3231::_bcd2dec(mon) < 1 || ns_module_ds3231::_bcd2dec(mon) > 12) { return false; }
+    if (!ds3231BcdValid(yr)) { return false; }
+
     return true;
+}
+
+// Канонический ли это адрес DS3231 (0x68) или совместимого чипа (DS32B35/DS32C35 — 0x57).
+// DS3231 не имеет настраиваемого адреса, поэтому полный обход шины не нужен и опасен:
+// на шине могут быть другие устройства (например, датчик освещённости на 0x10),
+// которые проходили слабую проверку и «притворялись» RTC.
+bool ds3231IsCanonicalAddr(uint8_t addr) {
+    return (addr == DS3231_DEFAULT_ADDR) || (addr == 0x57);
 }
 
 uint8_t CLASS_MODULE_DS3231::_scanForDS3231() {
     DEBUGDS3231("DS3231: сканирование шины I2C...\r\n");
-    for (uint8_t addr = 0x01; addr < 0x7F; addr++) {
+    // Сканируем только канонические адреса DS3231 (0x68) и совместимых чипов (0x57).
+    static const uint8_t candidates[] = { DS3231_DEFAULT_ADDR, 0x57 };
+    const uint8_t n = (uint8_t)(sizeof(candidates) / sizeof(candidates[0]));
+    for (uint8_t i = 0; i < n; i++) {
 #if defined(ESP32)
         esp_task_wdt_reset();
 #elif defined(ESP8266)
         ESP.wdtFeed();
 #endif
-        if (_detectDS3231(addr)) {
-            DEBUGDS3231("DS3231: 0x%02X\r\n", addr);
-            return addr;
+        if (_detectDS3231(candidates[i])) {
+            DEBUGDS3231("DS3231: 0x%02X\r\n", candidates[i]);
+            return candidates[i];
         }
     }
     DEBUGDS3231("DS3231: устройство НЕ найдено\r\n");

@@ -76,6 +76,13 @@ void CLASS_MODULE_DS3231::begin() {
 
     if (!_wireStarted) { _wireStarted = true; Wire.begin(); }
 
+    // Отбрасываем сохранённый адрес, не являющийся каноническим для DS3231
+    // (например, результат прежнего ложного определения чужого I2C-устройства).
+    if (_config.addr != DS3231_ADDR_NONE && !ds3231IsCanonicalAddr(_config.addr)) {
+        DEBUGDS3231("DS3231: 0x%02X  is not a canonical DS3231 address. Rescan...\r\n", _config.addr);
+        _config.addr = DS3231_ADDR_NONE;
+    }
+
     if (_config.addr != DS3231_ADDR_NONE) {
         bool found = false;
         for (uint8_t retry = 0; retry < DS3231_SCAN_RETRIES; retry++) {
