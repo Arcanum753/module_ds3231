@@ -44,6 +44,15 @@
             <tr><td colspan="2" style="text-align: center; padding: 8px;">
                 <input type="button" value="Установить вручную" class="button-prog" onclick="setTimeManual()">
             </td></tr>
+            <tr><td colspan="2" style="padding: 8px; border-top: 1px solid #ddd;">
+                <label style="cursor: pointer;">
+                    <input type="checkbox" id="ds_autoCorrectOnStart">
+                    Автокоррекция при старте (RTC без батарейки)
+                </label>
+                <input type="button" value="Сохранить" class="button-prog" style="margin-left: 8px;" onclick="saveAutoCorrectConfig()">
+                <span id="autoCorrectStatus" style="margin-left: 8px; font-size: 12px;"></span>
+                <div style="font-size: 0.85em; color: #777; margin-top: 4px;">Применяется при следующей загрузке.</div>
+            </td></tr>
         </table>
     </div>
 
@@ -374,6 +383,19 @@
                 const text = await resp.text();
                 showStatus(statusEl, text, text === 'OK');
                 if (text === 'OK') { toggleAutoPoll(); }
+            } catch(e) {
+                showStatus(statusEl, 'Error', false);
+            }
+        }
+
+        async function saveAutoCorrectConfig() {
+            const enabled = document.getElementById('ds_autoCorrectOnStart').checked ? 'true' : 'false';
+            const statusEl = document.getElementById('autoCorrectStatus');
+            statusEl.innerHTML = 'Saving...';
+            try {
+                const resp = await fetch(`/ds3231/save?autoCorrectOnStart=${enabled}`, { method: 'POST' });
+                const text = await resp.text();
+                showStatus(statusEl, text, text === 'OK');
             } catch(e) {
                 showStatus(statusEl, 'Error', false);
             }

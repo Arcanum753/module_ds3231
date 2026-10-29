@@ -3,6 +3,8 @@
 #include "module_ds3231.h"
 #include "common_module.h"
 #include "core_sys/eertos.h"
+#include "core_state/core_state.h"
+#include "core_sys/core_sys.h"
 
 #include "core_terminal/core_terminal.h"
 #include "core_terminal/ErriezSerialTerminal.h"
@@ -49,7 +51,9 @@ time_t CLASS_MODULE_DS3231::getTime() {
 }
 
 bool CLASS_MODULE_DS3231::setTime(time_t t) {
-    return _writeTime(t);
+    bool ok = _writeTime(t);
+    if (ok) { _startupCorrectionPending = false; }
+    return ok;
 }
 
 bool CLASS_MODULE_DS3231::setTime(int yr, int mon, int day, int hr, int min, int sec) {
@@ -74,7 +78,9 @@ bool CLASS_MODULE_DS3231::setTime(int yr, int mon, int day, int hr, int min, int
     tm.Minute = min;
     tm.Second = sec;
     time_t t = makeTime(tm);
-    return _writeTime(t);
+    bool ok = _writeTime(t);
+    if (ok) { _startupCorrectionPending = false; }
+    return ok;
 }
 
 bool CLASS_MODULE_DS3231::getTemperature(float &temp) {
@@ -172,11 +178,6 @@ bool CLASS_MODULE_DS3231::_writeBlock(uint8_t reg, uint8_t *buf, uint8_t len) {
 // Детекция DS3231
 // ============================================================
 
-// Проверка, что байт — корректный BCD (обе тетрады ≤ 9)
-static bool ds3231BcdValid(uint8_t v) {
-    return ((v >> 4) <= 9) && ((v & 0x0F) <= 9);
-}
-
 bool CLASS_MODULE_DS3231::_detectDS3231(uint8_t addr) {
     Wire.beginTransmission(addr);
     uint8_t err = Wire.endTransmission();
@@ -211,6 +212,11 @@ bool CLASS_MODULE_DS3231::_detectDS3231(uint8_t addr) {
     int8_t tempUpper = (int8_t)Wire.read();
     if (tempUpper < -40 || tempUpper > 85) { return false; }
 
+    // OSF: RTC потерял питание/батарейку, регистры времени могут содержать
+    // произвольные значения. Остальные признаки (Status/Control/температура)
+    // уже подтвердили DS3231 — время будет проверено и скорректировано в begin().
+    if (stat & 0x80) { return true; }
+
     // Регистры времени (0x00..0x06) должны содержать корректный BCD в допустимых
     // диапазонах — защита от ложного определения чужого I2C-устройства.
     Wire.beginTransmission(addr);
@@ -222,22 +228,9 @@ bool CLASS_MODULE_DS3231::_detectDS3231(uint8_t addr) {
     uint8_t t[7];
     for (uint8_t i = 0; i < 7; i++) { t[i] = Wire.read(); }
 
-    uint8_t sec  = t[0] & 0x7F;
-    uint8_t min  = t[1] & 0x7F;
-    uint8_t hour = t[2] & 0x3F;
-    uint8_t dow  = t[3] & 0x07;
-    uint8_t day  = t[4] & 0x3F;
-    uint8_t mon  = t[5] & 0x1F;
-    uint8_t yr   = t[6];
-
-    if (!ds3231BcdValid(sec) || !ds3231BcdValid(min) || !ds3231BcdValid(hour)) { return false; }
-    if (ns_module_ds3231::_bcd2dec(sec)  > 59) { return false; }
-    if (ns_module_ds3231::_bcd2dec(min)  > 59) { return false; }
-    if (ns_module_ds3231::_bcd2dec(hour) > 23) { return false; }
+    uint8_t dow = t[3] & 0x07;
+    if (!ns_module_ds3231::_timeRegsValid(t)) { return false; }
     if (dow < 1 || dow > 7) { return false; }
-    if (!ds3231BcdValid(day) || ns_module_ds3231::_bcd2dec(day) < 1 || ns_module_ds3231::_bcd2dec(day) > 31) { return false; }
-    if (!ds3231BcdValid(mon) || ns_module_ds3231::_bcd2dec(mon) < 1 || ns_module_ds3231::_bcd2dec(mon) > 12) { return false; }
-    if (!ds3231BcdValid(yr)) { return false; }
 
     return true;
 }
@@ -277,22 +270,9 @@ uint8_t CLASS_MODULE_DS3231::_scanForDS3231() {
 time_t CLASS_MODULE_DS3231::_readTime() {
     uint8_t buf[7];
     if (!_readBlock(0x00, buf, 7)) { return 0; }
-
-    uint8_t sec   = ns_module_ds3231::_bcd2dec(buf[0] & 0x7F);
-    uint8_t min   = ns_module_ds3231::_bcd2dec(buf[1]);
-    uint8_t hour  = ns_module_ds3231::_bcd2dec(buf[2] & 0x3F);
-    uint8_t day   = ns_module_ds3231::_bcd2dec(buf[4]);
-    uint8_t mon   = ns_module_ds3231::_bcd2dec(buf[5] & 0x1F);
-    uint16_t yr   = ns_module_ds3231::_bcd2dec(buf[6]) + 2000;
-
-    tmElements_t tm;
-    tm.Year   = yr - 1970;
-    tm.Month  = mon;
-    tm.Day    = day;
-    tm.Hour   = hour;
-    tm.Minute = min;
-    tm.Second = sec;
-    return makeTime(tm);
+    time_t t = 0;
+    if (!ns_module_ds3231::_decodeTime(buf, t, false)) { return 0; }
+    return t;
 }
 
 bool CLASS_MODULE_DS3231::_writeTime(time_t t) {
@@ -315,6 +295,117 @@ bool CLASS_MODULE_DS3231::_writeTime(time_t t) {
         if (stat & 0x80) { _writeReg(0x0F, stat & 0x7F); }
     }
     return ok;
+}
+
+// ============================================================
+// Автокоррекция времени RTC при старте
+// ============================================================
+
+// Чтение времени с проверкой BCD-регистров и диапазонов даты. В отличие от
+// _readTime() отсекает мусорные значения (31 февраля, месяц 0 и т.п.).
+bool CLASS_MODULE_DS3231::_readTimeChecked(time_t& out) {
+    uint8_t buf[7];
+    if (!_readBlock(0x00, buf, 7)) { return false; }
+    return ns_module_ds3231::_decodeTime(buf, out, true);
+}
+
+// Оценка времени RTC: OSF, валидность регистров, диапазон.
+Ds3231RtcVerdict CLASS_MODULE_DS3231::_evaluateRtcTime(time_t& out) {
+    out = 0;
+    if (_config.addr == DS3231_ADDR_NONE) { return DS3231_RTC_UNREADABLE; }
+
+    // Несколько попыток на случай единичного сбоя I2C при старте.
+    for (uint8_t attempt = 0; attempt < 3; attempt++) {
+        uint8_t stat = _readReg(0x0F);
+        if (_lastError != 0) { delay(10); continue; }
+        // OSF: осциллятор останавливался (например, RTC без батарейки) — время недостоверно.
+        if (stat & 0x80) { return DS3231_RTC_INVALID; }
+
+        if (_readTimeChecked(out)) {
+            if (out < CORE_SYS_TIME_MIN_VALID) {
+                return DS3231_RTC_INVALID;
+            }
+            return DS3231_RTC_VALID;
+        }
+        // Блок прочитан успешно (_lastError == 0), но значения невалидны —
+        // это достоверно «битое» время, а не сбой шины.
+        if (_lastError == 0) { return DS3231_RTC_INVALID; }
+        delay(10);
+    }
+    return DS3231_RTC_UNREADABLE;
+}
+
+// Коррекция при старте модуля. Если RTC недостоверен, пишем системное время:
+// при наличии валидного источника — его время, иначе fallback внутренних часов
+// (2000-01-01 + аптайм), чтобы RTC сразу начал идти. После fallback-записи
+// ожидаем первый валидный источник и один раз перезаписываем точное время.
+void CLASS_MODULE_DS3231::_startupTimeCorrection() {
+    if (_config.addr == DS3231_ADDR_NONE) { return; }
+
+    time_t rtcT = 0;
+    Ds3231RtcVerdict verdict = _evaluateRtcTime(rtcT);
+
+    if (verdict == DS3231_RTC_VALID) {
+        DEBUGDS3231("DS3231: RTC time valid, startup correction not needed\r\n");
+        return;
+    }
+    if (verdict == DS3231_RTC_UNREADABLE) {
+        // Не затираем RTC, достоверность которого не удалось установить.
+        DEBUGDS3231("DS3231: RTC time unreadable, startup correction skipped\r\n");
+        return;
+    }
+    if (!_config.autoCorrectOnStart) {
+        DEBUGDS3231("DS3231: RTC time invalid, startup correction disabled\r\n");
+        return;
+    }
+
+    bool   sourceValid = core_sys.timeValid();
+    time_t target      = core_sys.timeNow();
+    if (target <= 0) {
+        DEBUGDS3231("DS3231: startup correction skipped (no system time)\r\n");
+        return;
+    }
+
+    if (_writeTime(target)) {
+        _startupCorrectionPending = !sourceValid;
+        DEBUGDS3231("DS3231: startup correction wrote %lld (source=%s, pending=%d)\r\n",
+                    (long long)target,
+                    sourceValid ? core_sys.timeSourceName() : "fallback",
+                    _startupCorrectionPending ? 1 : 0);
+    } else {
+        _startupCorrectionPending = true;
+        DEBUGDS3231("DS3231: startup correction write failed\r\n");
+    }
+}
+
+// Отложенная коррекция: первый валидный источник появился после fallback-записи.
+void CLASS_MODULE_DS3231::_applyPendingCorrection() {
+    if (!_startupCorrectionPending) { return; }
+    if (!core_sys.timeValid()) { return; }
+    if (_config.addr == DS3231_ADDR_NONE) {
+        _startupCorrectionPending = false;
+        return;
+    }
+
+    time_t t = core_sys.timeNow();
+    if (t < CORE_SYS_TIME_MIN_VALID) { return; }
+
+    if (_writeTime(t)) {
+        _startupCorrectionPending = false;
+        DEBUGDS3231("DS3231: pending correction applied from '%s'\r\n",
+                    core_sys.timeSourceName());
+    } else {
+        DEBUGDS3231("DS3231: pending correction write failed\r\n");
+    }
+}
+
+// Подписчик time.source_changed (первый выбор источника, смена, выход из fallback).
+int CLASS_MODULE_DS3231::_onTimeSourceChanged(void* user, int argc,
+                                              const BusValue* argv, BusValue& result) {
+    (void)argc; (void)argv; (void)result;
+    CLASS_MODULE_DS3231* self = (CLASS_MODULE_DS3231*)user;
+    if (self != nullptr) { self->_applyPendingCorrection(); }
+    return 0;
 }
 
 // ============================================================

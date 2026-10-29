@@ -18,6 +18,7 @@
 #endif
 
 #include "module_ds3231_types.h"
+#include "core_state/core_state_types.h"   // BusValue для подписчика событий
 
 class CLASS_MODULE_DS3231 {
 public:
@@ -89,6 +90,13 @@ private:
     time_t _readTime();
     bool _writeTime(time_t t);
 
+    // Автокоррекция времени RTC при старте
+    bool _readTimeChecked(time_t& out);
+    Ds3231RtcVerdict _evaluateRtcTime(time_t& out);
+    void _startupTimeCorrection();
+    void _applyPendingCorrection();
+    static int _onTimeSourceChanged(void* user, int argc, const BusValue* argv, BusValue& result);
+
     // SQW / GPIO — внутренняя логика (только ESP32)
 #if defined(ESP32)
     void sqwPollStep();                // шаг опроса через EERTOS
@@ -118,6 +126,7 @@ protected:
     strDs3231Config _config;
     int _lastError;
     bool _wireStarted;
+    bool _startupCorrectionPending;   // ждём первый валидный источник после fallback-записи
 #if defined(ESP32)
     volatile bool _sqwIrqFlag;      // флаг срабатывания от ISR
     bool          _sqwLastLowEdge;  // состояние уровня для edge-детекции

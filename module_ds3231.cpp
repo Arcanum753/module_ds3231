@@ -7,6 +7,7 @@
 #include "core_json/core_json.h"
 #include "core_ntp/NtpClientLib.h"
 #include "core_sys/core_sys.h"
+#include "core_state/core_state.h"
 #include "core_terminal/core_terminal.h"
 #include "core_terminal/ErriezSerialTerminal.h"
 
@@ -21,6 +22,7 @@ void ds3231CmdSqr();
 CLASS_MODULE_DS3231 module_ds3231;
 CLASS_MODULE_DS3231::CLASS_MODULE_DS3231() {
     _lastError = 0; _wireStarted = false;
+    _startupCorrectionPending = false;
 #if defined(ESP32)
     _sqwIrqFlag = false;
     _sqwLastLowEdge = false;
@@ -101,6 +103,12 @@ void CLASS_MODULE_DS3231::begin() {
 
     if (_config.addr != DS3231_ADDR_NONE) {
         DEBUGDS3231("DS3231: inited, adr: 0x%02X\r\n", _config.addr);
+        // Если запишем fallback — уточним время при первом валидном источнике.
+        core_state.on("time.source_changed", _onTimeSourceChanged, this);
+        // Автокоррекция недостоверного времени RTC (OSF/вне диапазона).
+        _startupTimeCorrection();
+        // Источник мог появиться, пока шла оценка RTC, — применяем сразу.
+        _applyPendingCorrection();
     } else {
         DEBUGDS3231("DS3231: Not found!\r\n");
     }
@@ -226,7 +234,7 @@ void CLASS_MODULE_DS3231::handleRead(AsyncWebServerRequest *request) {
         time_t t = _readTime();
         if (t > 0) {
             String dt = "";
-            if (year(t) > 2000) {
+            if (year(t) >= 2000) {
                 dt += String(year(t)) + "-";
                 if (month(t) < 10) { dt += "0"; }
                 dt += String(month(t)) + "-";
@@ -340,7 +348,7 @@ void CLASS_MODULE_DS3231::handlePoll(AsyncWebServerRequest *request) {
         time_t t = _readTime();
         if (t > 0) {
             String dt = "";
-            if (year(t) > 2000) {
+            if (year(t) >= 2000) {
                 dt += String(year(t)) + "-";
                 if (month(t) < 10) { dt += "0"; }
                 dt += String(month(t)) + "-";
@@ -411,6 +419,7 @@ void CLASS_MODULE_DS3231::handleSetTime(AsyncWebServerRequest *request) {
         if (NTP.getLastNTPSync() > 0) {
             time_t nowT = now();
             if (_writeTime(nowT)) {
+                _startupCorrectionPending = false;
                 request->send(200, "text/plain", "OK");
             } else {
                 request->send(200, "text/plain", "Write error");
@@ -530,6 +539,10 @@ void CLASS_MODULE_DS3231::handleSaveConfig(AsyncWebServerRequest *request) {
         if (val > 3600) { val = 3600; }
         _config.pollInterval = val;
     }
+    if (request->hasArg("autoCorrectOnStart")) {
+        _config.autoCorrectOnStart = (request->arg("autoCorrectOnStart") == "true" ||
+                                      request->arg("autoCorrectOnStart") == "1");
+    }
 #if defined(ESP32)
     if (request->hasArg("sqwEnabled")) {
         _config.sqwEnabled = (request->arg("sqwEnabled") == "true");
@@ -557,6 +570,7 @@ void CLASS_MODULE_DS3231::handleInfo(AsyncWebServerRequest *request) {
     String values = "";
     values += "ds_autoPoll|"      + String(_config.autoPoll ? "checked" : "") + "|chk\n";
     values += "ds_pollInterval|"  + String(_config.pollInterval)               + "|input\n";
+    values += "ds_autoCorrectOnStart|" + String(_config.autoCorrectOnStart ? "checked" : "") + "|chk\n";
     values += "ds_scanRetries|"   + String(DS3231_SCAN_RETRIES)               + "|div\n";
 #if defined(ESP32)
     values += "ds_sqw_enabled|"   + String(_config.sqwEnabled ? "checked" : "") + "|chk\n";
@@ -614,9 +628,10 @@ void CLASS_MODULE_DS3231::emitAlarmState(String &values) {
 // ============================================================
 
 void CLASS_MODULE_DS3231::defaultConfig() {
-    _config.addr         = DS3231_ADDR_NONE;
-    _config.autoPoll     = false;
-    _config.pollInterval = 5;
+    _config.addr               = DS3231_ADDR_NONE;
+    _config.autoPoll           = false;
+    _config.autoCorrectOnStart = true;   // по умолчанию включено
+    _config.pollInterval       = 5;
 #if defined(ESP32)
     _config.sqwEnabled     = true;          // мониторинг SQW/INT# включён по умолчанию
     _config.sqwMode        = DS3231_SQW_MODE_POLLING;
@@ -635,9 +650,11 @@ bool CLASS_MODULE_DS3231::loadConfig() {
     JsonDocument doc;
     if (core_json.jsonFileLoadDoc(CONFIG_FILE_DS3231, doc) == false) { return false; }
 
-    _config.addr         = doc["addr"].as<uint8_t>();
-    _config.autoPoll     = doc["autoPoll"].as<bool>();
-    _config.pollInterval = doc["pollInterval"].as<uint16_t>();
+    _config.addr               = doc["addr"].as<uint8_t>();
+    _config.autoPoll           = doc["autoPoll"].as<bool>();
+    // Старые конфиги без поля должны оставаться с включённой автокоррекцией.
+    _config.autoCorrectOnStart = doc["autoCorrectOnStart"] | true;
+    _config.pollInterval       = doc["pollInterval"].as<uint16_t>();
 #if defined(ESP32)
     _config.sqwEnabled     = doc["sqwEnabled"].as<bool>();
     _config.sqwMode        = doc["sqwMode"].as<uint8_t>();
@@ -652,7 +669,8 @@ bool CLASS_MODULE_DS3231::loadConfig() {
     }
 #endif
 
-    DEBUGDS3231("addr: 0x%02X, autoPoll: %d, pollInterval: %d\r\n", _config.addr, _config.autoPoll, _config.pollInterval);
+    DEBUGDS3231("addr: 0x%02X, autoPoll: %d, autoCorrectOnStart: %d, pollInterval: %d\r\n",
+                _config.addr, _config.autoPoll, _config.autoCorrectOnStart, _config.pollInterval);
     return true;
 }
 
@@ -660,9 +678,10 @@ bool CLASS_MODULE_DS3231::saveConfig() {
     DEBUGDS3231("%s\r\n", __FUNCTION__);
     JsonDocument doc;
     core_json.jsonFileLoadDoc(CONFIG_FILE_DS3231, doc);
-    doc["addr"]         = _config.addr;
-    doc["autoPoll"]     = _config.autoPoll;
-    doc["pollInterval"] = _config.pollInterval;
+    doc["addr"]               = _config.addr;
+    doc["autoPoll"]           = _config.autoPoll;
+    doc["autoCorrectOnStart"] = _config.autoCorrectOnStart;
+    doc["pollInterval"]       = _config.pollInterval;
 #if defined(ESP32)
     doc["sqwEnabled"]     = _config.sqwEnabled;
     doc["sqwMode"]        = _config.sqwMode;

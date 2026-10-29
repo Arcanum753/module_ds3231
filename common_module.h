@@ -3,6 +3,7 @@
 #define _MODULE_DS3231_COMMON_MODULE_h
 
 #include <stdint.h>
+#include <time.h>
 #include <Arduino.h>
 
 // Вспомогательные функции модуля DS3231 (чистые, без состояния).
@@ -11,6 +12,18 @@ namespace ns_module_ds3231 {
 // BCD <-> DEC
 uint8_t _dec2bcd(uint8_t dec);
 uint8_t _bcd2dec(uint8_t bcd);
+
+// Проверка, что байт — корректный BCD (обе тетрады <= 9).
+bool _bcdValid(uint8_t bcd);
+
+// Проверка регистров времени 0x00..0x06: BCD и допустимые диапазоны полей.
+// День недели (регистр 0x03) не проверяется — это делает вызывающий код.
+bool _timeRegsValid(const uint8_t regs[7]);
+
+// Декодировать регистры времени 0x00..0x06.
+// strict=false — без проверки (поведение прежнего _readTime);
+// strict=true  — false при невалидном BCD, диапазоне или невозможной дате.
+bool _decodeTime(const uint8_t regs[7], time_t& out, bool strict);
 
 // Будильники — декодирование/кодирование режимов
 // Alarm 1: 4 байта с 0x07 (sec, min, hour, day/date)

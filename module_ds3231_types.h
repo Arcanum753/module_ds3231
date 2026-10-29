@@ -26,9 +26,17 @@
 #endif
 #endif
 
+// Результат оценки времени RTC при старте.
+enum Ds3231RtcVerdict : uint8_t {
+    DS3231_RTC_VALID = 0,
+    DS3231_RTC_INVALID,
+    DS3231_RTC_UNREADABLE
+};
+
 typedef struct {
     uint8_t  addr;
     bool     autoPoll;
+    bool     autoCorrectOnStart;   // автокоррекция времени RTC при старте (без батарейки)
     uint16_t pollInterval;
     // === SQW / GPIO (только ESP32) ===
     bool     sqwEnabled;     // вкл/выкл GPIO мониторинг
