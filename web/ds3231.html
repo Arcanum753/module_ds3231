@@ -12,7 +12,7 @@
 
     <!-- Статус подключения -->
     <div class="content" style="text-align: center;">
-        <table class="scan">
+        <table class="global_table_style">
             <tr><th>Состояние / Status</th></tr>
             <tr><td style="padding: 8px; font-size: 1.1em;">
                 <span id="ds_state" style="font-weight:bold;">--</span>
@@ -27,7 +27,7 @@
 
     <!-- Время и дата -->
     <div class="content" style="text-align: center;">
-        <table class="scan">
+        <table class="global_table_style">
             <tr><th colspan="2">Время и дата / Time &amp; Date</th></tr>
             <tr><td colspan="2" style="padding: 10px; font-size: 1.3em;"><span id="ds_time">--</span></td></tr>
             <tr><td colspan="2" style="padding: 6px;">
@@ -60,7 +60,7 @@
     <div class="content" style="text-align: center;">
         <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
             <!-- Будильник 1 -->
-            <table class="scan" style="width: auto; margin: 0;">
+            <table class="global_table_style" style="width: auto; margin: 0;">
                 <tr><th colspan="2">Будильник 1 / Alarm 1 (с секундами)</th></tr>
                 <tr><td class="label">Час</td><td><input type="number" id="ds_alarm1_hour" min="0" max="23" value="0" style="width:80px;"></td></tr>
                 <tr><td class="label">Минута</td><td><input type="number" id="ds_alarm1_min" min="0" max="59" value="0" style="width:80px;"></td></tr>
@@ -83,7 +83,7 @@
                 </td></tr>
             </table>
             <!-- Будильник 2 -->
-            <table class="scan" style="width: auto; margin: 0;">
+            <table class="global_table_style" style="width: auto; margin: 0;">
                 <tr><th colspan="2">Будильник 2 / Alarm 2 (без секунд)</th></tr>
                 <tr><td class="label">Час</td><td><input type="number" id="ds_alarm2_hour" min="0" max="23" value="0" style="width:80px;"></td></tr>
                 <tr><td class="label">Минута</td><td><input type="number" id="ds_alarm2_min" min="0" max="59" value="0" style="width:80px;"></td></tr>
@@ -108,7 +108,7 @@
 
     <!-- Регистры управления -->
     <div class="content" style="text-align: center;">
-        <table class="scan">
+        <table class="global_table_style">
             <tr><th colspan="2">Регистры управления / Control Registers</th></tr>
             <tr>
                 <td class="label">Control (0x0E)</td>
@@ -130,7 +130,7 @@
     <div class="content" style="text-align: center;">
         <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap;">
             <!-- Автоопрос -->
-            <table class="scan" style="width: auto; margin: 0;">
+            <table class="global_table_style" style="width: auto; margin: 0;">
                 <tr><th colspan="2">Автоопрос / Auto-poll</th></tr>
             <tr>
                 <td class="label">Включить</td>
@@ -146,7 +146,7 @@
             </td></tr>
             </table>
             <!-- SQW / GPIO (только ESP32) -->
-            <table class="scan" style="width: auto; margin: 0;">
+            <table class="global_table_style" style="width: auto; margin: 0;">
                 <tr><th colspan="2">Вывод SQW / INT# (GPIO)</th></tr>
             <tr>
                 <td class="label">Включить мониторинг</td>
@@ -184,7 +184,7 @@
             </td></tr>
             </table>
             <!-- Режим выхода SQW (Control 0x0E) -->
-            <table class="scan" style="width: auto; margin: 0;">
+            <table class="global_table_style" style="width: auto; margin: 0;">
                 <tr><th colspan="2">Режим выхода SQW (Control 0x0E)</th></tr>
             <tr>
                 <td class="label">BBSQW / INTCN</td>
@@ -220,7 +220,7 @@
 
     <!-- Описание / Reference: все подсказки внизу страницы -->
     <div class="content" style="text-align: center;">
-        <table class="scan">
+        <table class="global_table_style">
             <tr><th>Как настроить будильник</th></tr>
             <tr><td style="text-align: left; padding: 10px; font-size: 0.92em; line-height: 1.6;">
                 <b>Alarm 1 (с секундами).</b> Задайте <i>Час / Минута / Секунда</i> и выберите «Режим» — он определяет, какие поля сравниваются с текущим временем:
@@ -234,7 +234,7 @@
                 <br>После заполнения нажмите <b>«Установить»</b>.
             </td></tr>
         </table>
-        <table class="scan">
+        <table class="global_table_style">
             <tr><th colspan="3">Биты Control (0x0E) — описание</th></tr>
             <tr><td class="label">EOSC</td><td><span id="ds_ctrl_eosc">0</span></td><td style="text-align:left;font-size:0.9em;">1=останов генератора, чип переходит в спящий режим (энергосбережение)</td></tr>
             <tr><td class="label">BBSQW</td><td><span id="ds_ctrl_bbsqw">0</span></td><td style="text-align:left;font-size:0.9em;">1=выход SQW выдаёт меандр (частоту из RS), 0=INT# сигнал (приоритет INTCN)</td></tr>
@@ -244,7 +244,7 @@
             <tr><td class="label">A2IE</td><td><span id="ds_ctrl_a2ie">0</span></td><td style="text-align:left;font-size:0.9em;">1=разрешить прерывание от Alarm 2 на INT#</td></tr>
             <tr><td class="label">A1IE</td><td><span id="ds_ctrl_a1ie">0</span></td><td style="text-align:left;font-size:0.9em;">1=разрешить прерывание от Alarm 1 на INT#</td></tr>
         </table>
-        <table class="scan">
+        <table class="global_table_style">
             <tr><th colspan="3">Биты Status (0x0F) — описание</th></tr>
             <tr><td class="label">OSF</td><td><span id="ds_stat_osf">0</span></td><td style="text-align:left;font-size:0.9em;">1=осциллятор остановлен (пропало питание, сброс после установки времени)</td></tr>
             <tr><td class="label">EN32kHz</td><td><span id="ds_stat_en32khz">0</span></td><td style="text-align:left;font-size:0.9em;">1=включить выход 32.768кГц на ножку 32kHz</td></tr>
