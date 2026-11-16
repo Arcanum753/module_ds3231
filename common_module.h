@@ -34,6 +34,9 @@ void _encodeAlarm1Mode(uint8_t *buf, uint8_t sec, uint8_t min, uint8_t hour, uin
 void _decodeAlarm2Mode(uint8_t *buf, uint8_t &mode, uint8_t &dayOrDate, bool &isDayOfWeek);
 void _encodeAlarm2Mode(uint8_t *buf, uint8_t min, uint8_t hour, uint8_t mode, uint8_t dayOrDate, bool isDayOfWeek);
 
+// Форматирование времени: YYYY-MM-DD HH:MM:SS (0 — "--").
+void _formatTime(time_t t, String &out);
+
 #if defined(ESP32)
 // Форматирование времени срабатывания будильников
 void _formatAlarmTime(time_t t, String &out);

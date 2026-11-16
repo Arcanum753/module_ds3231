@@ -162,11 +162,9 @@ void _encodeAlarm2Mode(uint8_t *buf, uint8_t min, uint8_t hour, uint8_t mode, ui
     }
 }
 
-#if defined(ESP32)
-// Форматирование времени срабатывания: YYYY-MM-DD HH:MM:SS. Если время
-// недостоверно (t==0, например OSF), возвращаем пометку "time invalid".
-void _formatAlarmTime(time_t t, String &out) {
-    if (t == 0) { out = "(time invalid)"; return; }
+// Форматирование времени: YYYY-MM-DD HH:MM:SS. Для t==0 — "--".
+void _formatTime(time_t t, String &out) {
+    if (t == 0) { out = "--"; return; }
     String dt = "";
     dt += String(year(t)) + "-";
     if (month(t) < 10) { dt += "0"; }
@@ -180,6 +178,14 @@ void _formatAlarmTime(time_t t, String &out) {
     if (second(t) < 10) { dt += "0"; }
     dt += String(second(t));
     out = dt;
+}
+
+#if defined(ESP32)
+// Форматирование времени срабатывания: YYYY-MM-DD HH:MM:SS. Если время
+// недостоверно (t==0, например OSF), возвращаем пометку "time invalid".
+void _formatAlarmTime(time_t t, String &out) {
+    if (t == 0) { out = "(time invalid)"; return; }
+    _formatTime(t, out);
 }
 
 // Форматирование штампа времени срабатывания для отображения.

@@ -31,6 +31,7 @@ public:
     void begin();
     void begin(ModContext& ctx);
     void web_Init();
+    void terminalRegister();
     void registerTimeSource();   // Time Source Provider API (core_sys)
 
     // ===== Публичное API для других модулей =====
@@ -62,6 +63,21 @@ public:
 #endif
 
 private:
+    // Терминальные команды: статические методы-члены, поэтому имеют
+    // прямой доступ к приватному состоянию модуля (см. _terminal.cpp).
+    static void s_terminalCmd();
+    static void s_cmdShow();
+    static void s_cmdTime();
+    static void s_cmdSet();
+    static void s_cmdTemp();
+    static void s_cmdAlarm1();
+    static void s_cmdAlarm2();
+    static void s_cmdAlarms();
+    static void s_cmdSqw();
+    static void s_cmdSqr();
+    static void s_cmdAutocor();
+    static void s_cmdSave();
+
     // Версионные методы
     String getVersionStr();
     String getGeneratedTime();
@@ -124,6 +140,7 @@ protected:
     FS* _fs;
 #endif
     strDs3231Config _config;
+    bool _configDirty;                // в памяти есть изменения, которых нет на FS
     int _lastError;
     bool _wireStarted;
     bool _startupCorrectionPending;   // ждём первый валидный источник после fallback-записи
@@ -138,9 +155,6 @@ protected:
     bool          _sqwInterrupting; // прерывание сейчас подключено
     friend void ds3231SqwIsr();      // ISR обрабатывает флаг через метод sqwSetIrqFlag
     friend void ds3231SqwPollTask(); // EERTOS-задача опроса
-    friend void ds3231CmdAlarm();    // терминальная команда ds-alarm
-    friend void ds3231CmdSqw();      // терминальная команда ds-sqw
-    friend void ds3231CmdSqr();      // терминальная команда ds-sqr
 #endif
 };
 
@@ -154,8 +168,5 @@ void ds3231SqwPollTask();            // периодическая задача 
 
 // Канонический ли адрес (0x68 — DS3231, 0x57 — DS32B35/DS32C35)
 bool ds3231IsCanonicalAddr(uint8_t addr);
-
-// Терминальные команды модуля (регистрируются через TerminalRegisterModule)
-void ds3231TerminalRegister();
 
 #endif // _MODULE_DS3231_h

@@ -8,20 +8,22 @@
 #include "core_ntp/NtpClientLib.h"
 #include "core_sys/core_sys.h"
 #include "core_state/core_state.h"
-#include "core_terminal/core_terminal.h"
-#include "core_terminal/ErriezSerialTerminal.h"
 
 #include <Wire.h>
 #include "common/TimeLib.h"
 
-// Терминальные команды модуля (реализация — в module_ds3231_engine.cpp)
-void ds3231CmdAlarm();
-void ds3231CmdSqw();
-void ds3231CmdSqr();
+// Строковые литералы веб-ответов: на ESP8266 держим их в flash — модуль
+// вместе с ядром занимает почти весь DRAM (см. module_ds3231.ini).
+#if defined(ESP8266)
+#define DS_F(s) F(s)
+#else
+#define DS_F(s) (s)
+#endif
 
 CLASS_MODULE_DS3231 module_ds3231;
 CLASS_MODULE_DS3231::CLASS_MODULE_DS3231() {
     _lastError = 0; _wireStarted = false;
+    _configDirty = false;
     _startupCorrectionPending = false;
 #if defined(ESP32)
     _sqwIrqFlag = false;
@@ -113,7 +115,7 @@ void CLASS_MODULE_DS3231::begin() {
         DEBUGDS3231("DS3231: Not found!\r\n");
     }
 
-    TerminalRegisterModule(ds3231TerminalRegister);
+    terminalRegister();
 
 #if defined(ESP32)
     // Применяем биты Control (0x0E), отвечающие за режим выхода SQW
@@ -199,34 +201,34 @@ void CLASS_MODULE_DS3231::handleRead(AsyncWebServerRequest *request) {
     String values = "";
 
     if (_config.addr == DS3231_ADDR_NONE) {
-        values += "ds_state|disconnected|div\n";
-        values += "ds_temp|--|div\n";
-        values += "ds_ctrl_reg|00|div\n";
-        values += "ds_stat_reg|00|div\n";
-        values += "ds_aging_offset|0|input\n";
-        values += "ds_alarm1_hour|0|input\n";
-        values += "ds_alarm1_min|0|input\n";
-        values += "ds_alarm1_sec|0|input\n";
-        values += "ds_alarm1_mode|0|input\n";
-        values += "ds_alarm1_dayOrDate|1|input\n";
-        values += "ds_alarm1_isDayOfWeek||chk\n";
-        values += "ds_alarm2_hour|0|input\n";
-        values += "ds_alarm2_min|0|input\n";
-        values += "ds_alarm2_mode|0|input\n";
-        values += "ds_alarm2_dayOrDate|1|input\n";
-        values += "ds_alarm2_isDayOfWeek||chk\n";
+        values += DS_F("ds_state|disconnected|div\n");
+        values += DS_F("ds_temp|--|div\n");
+        values += DS_F("ds_ctrl_reg|00|div\n");
+        values += DS_F("ds_stat_reg|00|div\n");
+        values += DS_F("ds_aging_offset|0|input\n");
+        values += DS_F("ds_alarm1_hour|0|input\n");
+        values += DS_F("ds_alarm1_min|0|input\n");
+        values += DS_F("ds_alarm1_sec|0|input\n");
+        values += DS_F("ds_alarm1_mode|0|input\n");
+        values += DS_F("ds_alarm1_dayOrDate|1|input\n");
+        values += DS_F("ds_alarm1_isDayOfWeek||chk\n");
+        values += DS_F("ds_alarm2_hour|0|input\n");
+        values += DS_F("ds_alarm2_min|0|input\n");
+        values += DS_F("ds_alarm2_mode|0|input\n");
+        values += DS_F("ds_alarm2_dayOrDate|1|input\n");
+        values += DS_F("ds_alarm2_isDayOfWeek||chk\n");
         char buf[16];
         snprintf(buf, sizeof(buf), "0x%02X", _config.addr);
-        values += "ds_addr|" + String(buf) + "|div\n";
+        values += DS_F("ds_addr|") + String(buf) + "|div\n";
         request->send(200, "text/plain", values);
         return;
     }
 
-    values += "ds_state|connected|div\n";
+    values += DS_F("ds_state|connected|div\n");
     {
         char buf[16];
         snprintf(buf, sizeof(buf), "0x%02X", _config.addr);
-        values += "ds_addr|" + String(buf) + "|div\n";
+        values += DS_F("ds_addr|") + String(buf) + "|div\n";
     }
 
     // Время
@@ -247,9 +249,9 @@ void CLASS_MODULE_DS3231::handleRead(AsyncWebServerRequest *request) {
                 if (second(t) < 10) { dt += "0"; }
                 dt += String(second(t));
             }
-            values += "ds_time|" + dt + "|div\n";
+            values += DS_F("ds_time|") + dt + "|div\n";
         } else {
-            values += "ds_time|Read error|div\n";
+            values += DS_F("ds_time|Read error|div\n");
         }
     }
 
@@ -259,9 +261,9 @@ void CLASS_MODULE_DS3231::handleRead(AsyncWebServerRequest *request) {
         if (getTemperature(temp)) {
             char tbuf[16];
             snprintf(tbuf, sizeof(tbuf), "%.2f", temp);
-            values += "ds_temp|" + String(tbuf) + "|div\n";
+            values += DS_F("ds_temp|") + String(tbuf) + "|div\n";
         } else {
-            values += "ds_temp|--|div\n";
+            values += DS_F("ds_temp|--|div\n");
         }
     }
 
@@ -272,26 +274,26 @@ void CLASS_MODULE_DS3231::handleRead(AsyncWebServerRequest *request) {
         uint8_t aging = _readReg(0x10);
         char rbuf[16];
         snprintf(rbuf, sizeof(rbuf), "0x%02X", ctrl);
-        values += "ds_ctrl_reg|" + String(rbuf) + "|div\n";
+        values += DS_F("ds_ctrl_reg|") + String(rbuf) + "|div\n";
         snprintf(rbuf, sizeof(rbuf), "0x%02X", stat);
-        values += "ds_stat_reg|" + String(rbuf) + "|div\n";
-        values += "ds_aging_offset|" + String(aging) + "|input\n";
+        values += DS_F("ds_stat_reg|") + String(rbuf) + "|div\n";
+        values += DS_F("ds_aging_offset|") + String(aging) + "|input\n";
 
         // Биты управления
-        values += "ds_ctrl_eosc|"   + String((ctrl & 0x80) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_bbsqw|"  + String((ctrl & 0x40) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_conv|"   + String((ctrl & 0x20) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_rs|"     + String((ctrl >> 3) & 3)           + "|div\n";
-        values += "ds_ctrl_intcn|"  + String((ctrl & 0x04) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_a2ie|"   + String((ctrl & 0x02) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_a1ie|"   + String((ctrl & 0x01) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_eosc|")   + String((ctrl & 0x80) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_bbsqw|")  + String((ctrl & 0x40) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_conv|")   + String((ctrl & 0x20) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_rs|")     + String((ctrl >> 3) & 3)           + "|div\n";
+        values += DS_F("ds_ctrl_intcn|")  + String((ctrl & 0x04) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_a2ie|")   + String((ctrl & 0x02) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_a1ie|")   + String((ctrl & 0x01) ? "1" : "0") + "|div\n";
 
         // Биты статуса
-        values += "ds_stat_osf|"    + String((stat & 0x80) ? "1" : "0") + "|div\n";
-        values += "ds_stat_en32khz|"+ String((stat & 0x08) ? "1" : "0") + "|div\n";
-        values += "ds_stat_bsy|"    + String((stat & 0x04) ? "1" : "0") + "|div\n";
-        values += "ds_stat_a2f|"    + String((stat & 0x02) ? "1" : "0") + "|div\n";
-        values += "ds_stat_a1f|"    + String((stat & 0x01) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_osf|")    + String((stat & 0x80) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_en32khz|")+ String((stat & 0x08) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_bsy|")    + String((stat & 0x04) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_a2f|")    + String((stat & 0x02) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_a1f|")    + String((stat & 0x01) ? "1" : "0") + "|div\n";
     }
 
     // Будильники
@@ -299,19 +301,19 @@ void CLASS_MODULE_DS3231::handleRead(AsyncWebServerRequest *request) {
         uint8_t h, m, s, mode, dayOrDate;
         bool isDOW;
         if (getAlarm1(h, m, s, mode, dayOrDate, isDOW)) {
-            values += "ds_alarm1_hour|"        + String(h)        + "|input\n";
-            values += "ds_alarm1_min|"         + String(m)        + "|input\n";
-            values += "ds_alarm1_sec|"         + String(s)        + "|input\n";
-            values += "ds_alarm1_mode|"        + String(mode)     + "|select\n";
-            values += "ds_alarm1_dayOrDate|"   + String(dayOrDate)+ "|input\n";
-            values += "ds_alarm1_isDayOfWeek|" + String(isDOW ? "checked" : "") + "|chk\n";
+            values += DS_F("ds_alarm1_hour|")        + String(h)        + "|input\n";
+            values += DS_F("ds_alarm1_min|")         + String(m)        + "|input\n";
+            values += DS_F("ds_alarm1_sec|")         + String(s)        + "|input\n";
+            values += DS_F("ds_alarm1_mode|")        + String(mode)     + "|select\n";
+            values += DS_F("ds_alarm1_dayOrDate|")   + String(dayOrDate)+ "|input\n";
+            values += DS_F("ds_alarm1_isDayOfWeek|") + String(isDOW ? "checked" : "") + "|chk\n";
         }
         if (getAlarm2(h, m, mode, dayOrDate, isDOW)) {
-            values += "ds_alarm2_hour|"        + String(h)        + "|input\n";
-            values += "ds_alarm2_min|"         + String(m)        + "|input\n";
-            values += "ds_alarm2_mode|"        + String(mode)     + "|select\n";
-            values += "ds_alarm2_dayOrDate|"   + String(dayOrDate)+ "|input\n";
-            values += "ds_alarm2_isDayOfWeek|" + String(isDOW ? "checked" : "") + "|chk\n";
+            values += DS_F("ds_alarm2_hour|")        + String(h)        + "|input\n";
+            values += DS_F("ds_alarm2_min|")         + String(m)        + "|input\n";
+            values += DS_F("ds_alarm2_mode|")        + String(mode)     + "|select\n";
+            values += DS_F("ds_alarm2_dayOrDate|")   + String(dayOrDate)+ "|input\n";
+            values += DS_F("ds_alarm2_isDayOfWeek|") + String(isDOW ? "checked" : "") + "|chk\n";
         }
     }
 
@@ -332,16 +334,16 @@ void CLASS_MODULE_DS3231::handlePoll(AsyncWebServerRequest *request) {
     // Поэтому поля конфига интервала здесь не применяются.
 
     if (_config.addr == DS3231_ADDR_NONE) {
-        values += "ds_state|disconnected|div\n";
+        values += DS_F("ds_state|disconnected|div\n");
         request->send(200, "text/plain", values);
         return;
     }
 
-    values += "ds_state|connected|div\n";
+    values += DS_F("ds_state|connected|div\n");
     {
         char buf[16];
         snprintf(buf, sizeof(buf), "0x%02X", _config.addr);
-        values += "ds_addr|" + String(buf) + "|div\n";
+        values += DS_F("ds_addr|") + String(buf) + "|div\n";
     }
 
     {
@@ -361,9 +363,9 @@ void CLASS_MODULE_DS3231::handlePoll(AsyncWebServerRequest *request) {
                 if (second(t) < 10) { dt += "0"; }
                 dt += String(second(t));
             }
-            values += "ds_time|" + dt + "|div\n";
+            values += DS_F("ds_time|") + dt + "|div\n";
         } else {
-            values += "ds_time|Read error|div\n";
+            values += DS_F("ds_time|Read error|div\n");
         }
     }
 
@@ -372,9 +374,9 @@ void CLASS_MODULE_DS3231::handlePoll(AsyncWebServerRequest *request) {
         if (getTemperature(temp)) {
             char tbuf[16];
             snprintf(tbuf, sizeof(tbuf), "%.2f", temp);
-            values += "ds_temp|" + String(tbuf) + "|div\n";
+            values += DS_F("ds_temp|") + String(tbuf) + "|div\n";
         } else {
-            values += "ds_temp|--|div\n";
+            values += DS_F("ds_temp|--|div\n");
         }
     }
 
@@ -383,23 +385,23 @@ void CLASS_MODULE_DS3231::handlePoll(AsyncWebServerRequest *request) {
         uint8_t stat = _readReg(0x0F);
         char rbuf[16];
         snprintf(rbuf, sizeof(rbuf), "0x%02X", ctrl);
-        values += "ds_ctrl_reg|" + String(rbuf) + "|div\n";
+        values += DS_F("ds_ctrl_reg|") + String(rbuf) + "|div\n";
         snprintf(rbuf, sizeof(rbuf), "0x%02X", stat);
-        values += "ds_stat_reg|" + String(rbuf) + "|div\n";
+        values += DS_F("ds_stat_reg|") + String(rbuf) + "|div\n";
 
-        values += "ds_ctrl_eosc|"   + String((ctrl & 0x80) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_bbsqw|"  + String((ctrl & 0x40) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_conv|"   + String((ctrl & 0x20) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_rs|"     + String((ctrl >> 3) & 3)           + "|div\n";
-        values += "ds_ctrl_intcn|"  + String((ctrl & 0x04) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_a2ie|"   + String((ctrl & 0x02) ? "1" : "0") + "|div\n";
-        values += "ds_ctrl_a1ie|"   + String((ctrl & 0x01) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_eosc|")   + String((ctrl & 0x80) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_bbsqw|")  + String((ctrl & 0x40) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_conv|")   + String((ctrl & 0x20) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_rs|")     + String((ctrl >> 3) & 3)           + "|div\n";
+        values += DS_F("ds_ctrl_intcn|")  + String((ctrl & 0x04) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_a2ie|")   + String((ctrl & 0x02) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_ctrl_a1ie|")   + String((ctrl & 0x01) ? "1" : "0") + "|div\n";
 
-        values += "ds_stat_osf|"    + String((stat & 0x80) ? "1" : "0") + "|div\n";
-        values += "ds_stat_en32khz|"+ String((stat & 0x08) ? "1" : "0") + "|div\n";
-        values += "ds_stat_bsy|"    + String((stat & 0x04) ? "1" : "0") + "|div\n";
-        values += "ds_stat_a2f|"    + String((stat & 0x02) ? "1" : "0") + "|div\n";
-        values += "ds_stat_a1f|"    + String((stat & 0x01) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_osf|")    + String((stat & 0x80) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_en32khz|")+ String((stat & 0x08) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_bsy|")    + String((stat & 0x04) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_a2f|")    + String((stat & 0x02) ? "1" : "0") + "|div\n";
+        values += DS_F("ds_stat_a1f|")    + String((stat & 0x01) ? "1" : "0") + "|div\n";
     }
 
     // SQW / будильники — проверяем флаги и выводим поля конфигурации
@@ -568,20 +570,20 @@ void CLASS_MODULE_DS3231::handleSaveConfig(AsyncWebServerRequest *request) {
 void CLASS_MODULE_DS3231::handleInfo(AsyncWebServerRequest *request) {
     DEBUGDS3231("%s\r\n", __FUNCTION__);
     String values = "";
-    values += "ds_autoPoll|"      + String(_config.autoPoll ? "checked" : "") + "|chk\n";
-    values += "ds_pollInterval|"  + String(_config.pollInterval)               + "|input\n";
-    values += "ds_autoCorrectOnStart|" + String(_config.autoCorrectOnStart ? "checked" : "") + "|chk\n";
-    values += "ds_scanRetries|"   + String(DS3231_SCAN_RETRIES)               + "|div\n";
+    values += DS_F("ds_autoPoll|")      + String(_config.autoPoll ? "checked" : "") + "|chk\n";
+    values += DS_F("ds_pollInterval|")  + String(_config.pollInterval)               + "|input\n";
+    values += DS_F("ds_autoCorrectOnStart|") + String(_config.autoCorrectOnStart ? "checked" : "") + "|chk\n";
+    values += DS_F("ds_scanRetries|")   + String(DS3231_SCAN_RETRIES)               + "|div\n";
 #if defined(ESP32)
-    values += "ds_sqw_enabled|"   + String(_config.sqwEnabled ? "checked" : "") + "|chk\n";
-    values += "ds_sqw_mode|"      + String(_config.sqwMode)                     + "|input\n";
-    values += "ds_sqw_level|"     + String(_config.sqwLevelActive ? "1" : "0")  + "|input\n";
-    values += "ds_sqw_pin|"       + String(DS3231_SQW_PIN)                      + "|div\n";
-    values += "ds_ctrl_bbsqw|"    + String(_config.ctrlBbsqw ? "1" : "0")       + "|input\n";
-    values += "ds_ctrl_rs|"       + String(_config.ctrlRs)                      + "|input\n";
-    values += "ds_ctrl_intcn|"    + String(_config.ctrlIntcn ? "1" : "0")       + "|input\n";
-    values += "ds_ctrl_a1ie|"     + String(_config.ctrlA1ie ? "checked" : "")   + "|chk\n";
-    values += "ds_ctrl_a2ie|"     + String(_config.ctrlA2ie ? "checked" : "")   + "|chk\n";
+    values += DS_F("ds_sqw_enabled|")   + String(_config.sqwEnabled ? "checked" : "") + "|chk\n";
+    values += DS_F("ds_sqw_mode|")      + String(_config.sqwMode)                     + "|input\n";
+    values += DS_F("ds_sqw_level|")     + String(_config.sqwLevelActive ? "1" : "0")  + "|input\n";
+    values += DS_F("ds_sqw_pin|")       + String(DS3231_SQW_PIN)                      + "|div\n";
+    values += DS_F("ds_ctrl_bbsqw|")    + String(_config.ctrlBbsqw ? "1" : "0")       + "|input\n";
+    values += DS_F("ds_ctrl_rs|")       + String(_config.ctrlRs)                      + "|input\n";
+    values += DS_F("ds_ctrl_intcn|")    + String(_config.ctrlIntcn ? "1" : "0")       + "|input\n";
+    values += DS_F("ds_ctrl_a1ie|")     + String(_config.ctrlA1ie ? "checked" : "")   + "|chk\n";
+    values += DS_F("ds_ctrl_a2ie|")     + String(_config.ctrlA2ie ? "checked" : "")   + "|chk\n";
 #endif
     request->send(200, "text/plain", values);
 }
@@ -589,18 +591,18 @@ void CLASS_MODULE_DS3231::handleInfo(AsyncWebServerRequest *request) {
 #if defined(ESP32)
 // Поля конфигурации SQW/GPIO для страницы. Вызывается handleRead/handlePoll
 void CLASS_MODULE_DS3231::emitSqwFields(String &values) {
-    values += "ds_sqw_enabled|" + String(_config.sqwEnabled ? "checked" : "") + "|chk\n";
-    values += "ds_sqw_mode|"    + String(_config.sqwMode)                       + "|input\n";
-    values += "ds_sqw_level|"   + String(_config.sqwLevelActive ? "1" : "0")    + "|input\n";
-    values += "ds_sqw_level_read|" + String(getSqwLevel() ? "1" : "0")          + "|div\n";
-    values += "ds_sqw_pin|"     + String(DS3231_SQW_PIN)                        + "|div\n";
+    values += DS_F("ds_sqw_enabled|") + String(_config.sqwEnabled ? "checked" : "") + "|chk\n";
+    values += DS_F("ds_sqw_mode|")    + String(_config.sqwMode)                       + "|input\n";
+    values += DS_F("ds_sqw_level|")   + String(_config.sqwLevelActive ? "1" : "0")    + "|input\n";
+    values += DS_F("ds_sqw_level_read|") + String(getSqwLevel() ? "1" : "0")          + "|div\n";
+    values += DS_F("ds_sqw_pin|")     + String(DS3231_SQW_PIN)                        + "|div\n";
 
     // Управляемые биты Control (0x0E)
-    values += "ds_ctrl_bbsqw|"  + String(_config.ctrlBbsqw ? "1" : "0") + "|input\n";
-    values += "ds_ctrl_rs|"     + String(_config.ctrlRs)               + "|input\n";
-    values += "ds_ctrl_intcn|"  + String(_config.ctrlIntcn ? "1" : "0") + "|input\n";
-    values += "ds_ctrl_a1ie|"   + String(_config.ctrlA1ie ? "checked" : "") + "|chk\n";
-    values += "ds_ctrl_a2ie|"   + String(_config.ctrlA2ie ? "checked" : "") + "|chk\n";
+    values += DS_F("ds_ctrl_bbsqw|")  + String(_config.ctrlBbsqw ? "1" : "0") + "|input\n";
+    values += DS_F("ds_ctrl_rs|")     + String(_config.ctrlRs)               + "|input\n";
+    values += DS_F("ds_ctrl_intcn|")  + String(_config.ctrlIntcn ? "1" : "0") + "|input\n";
+    values += DS_F("ds_ctrl_a1ie|")   + String(_config.ctrlA1ie ? "checked" : "") + "|chk\n";
+    values += DS_F("ds_ctrl_a2ie|")   + String(_config.ctrlA2ie ? "checked" : "") + "|chk\n";
 
     emitAlarmState(values);
 }
@@ -618,8 +620,8 @@ void CLASS_MODULE_DS3231::emitAlarmState(String &values) {
     else if (has1)    { st = "Alarm 1 сработал: " + t1; }
     else if (has2)    { st = "Alarm 2 сработал: " + t2; }
     else              { st = "--"; }
-    values += "ds_alarm_state|" + st + "|div\n";
-    values += "ds_alarm_any|"   + String(((has1 || has2) ? "1" : "0")) + "|div\n";
+    values += DS_F("ds_alarm_state|") + st + "|div\n";
+    values += DS_F("ds_alarm_any|")   + String(((has1 || has2) ? "1" : "0")) + "|div\n";
 }
 #endif // ESP32
 
@@ -628,6 +630,7 @@ void CLASS_MODULE_DS3231::emitAlarmState(String &values) {
 // ============================================================
 
 void CLASS_MODULE_DS3231::defaultConfig() {
+    _configDirty               = false;
     _config.addr               = DS3231_ADDR_NONE;
     _config.autoPoll           = false;
     _config.autoCorrectOnStart = true;   // по умолчанию включено
@@ -692,7 +695,9 @@ bool CLASS_MODULE_DS3231::saveConfig() {
     doc["ctrlA1ie"]       = _config.ctrlA1ie;
     doc["ctrlA2ie"]       = _config.ctrlA2ie;
 #endif
-    return core_json.jsonFileSaveDoc(CONFIG_FILE_DS3231, doc);
+    bool ok = core_json.jsonFileSaveDoc(CONFIG_FILE_DS3231, doc);
+    if (ok) { _configDirty = false; }
+    return ok;
 }
 
 // ============================================================
@@ -714,18 +719,8 @@ String CLASS_MODULE_DS3231::getCommitDateStr() {
 void CLASS_MODULE_DS3231::html_ver_get(AsyncWebServerRequest *request) {
     DEBUGDS3231("%s\r\n", __FUNCTION__);
     String values = "";
-    values += "ds3231version|" + getVersionStr()    + "|div\n";
-    values += "ds3231gentime|" + getGeneratedTime() + "|div\n";
-    values += "ds3231gendate|" + getCommitDateStr() + "|div\n";
+    values += DS_F("ds3231version|") + getVersionStr()    + "|div\n";
+    values += DS_F("ds3231gentime|") + getGeneratedTime() + "|div\n";
+    values += DS_F("ds3231gendate|") + getCommitDateStr() + "|div\n";
     request->send(200, "text/plain", values);
-}
-
-// ============================================================
-// Терминальные команды
-// ============================================================
-
-void ds3231TerminalRegister() {
-    term.addCommand("ds-alarm", ds3231CmdAlarm);
-    term.addCommand("ds-sqw",   ds3231CmdSqw);
-    term.addCommand("ds-sqr",   ds3231CmdSqr);
 }
